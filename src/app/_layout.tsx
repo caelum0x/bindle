@@ -25,6 +25,7 @@ export default function RootLayout() {
           name="entry/[id]"
           options={{ presentation: 'card', headerShown: false }}
         />
+        <Stack.Screen name="tags" options={{ presentation: 'card', headerShown: false }} />
       </Stack>
     </SafeAreaProvider>
   );

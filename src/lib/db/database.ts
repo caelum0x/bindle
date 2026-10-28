@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import type { EntryFilter, WallabagEntry } from '../api/types';
+import type { EntryFilter, WallabagEntry, WallabagTag } from '../api/types';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -69,7 +69,7 @@ export async function upsertEntries(items: WallabagEntry[]): Promise<void> {
   });
 }
 
-export async function getCachedEntries(filter: EntryFilter): Promise<WallabagEntry[]> {
+export async function getCachedEntries(filter: EntryFilter, tag?: string): Promise<WallabagEntry[]> {
   const db = await getDb();
   let where = '1=1';
   if (filter === 'unread') where = 'is_archived = 0';
@@ -78,7 +78,29 @@ export async function getCachedEntries(filter: EntryFilter): Promise<WallabagEnt
   const rows = await db.getAllAsync<EntryRow>(
     `SELECT * FROM entries WHERE ${where} ORDER BY created_at DESC LIMIT 200`
   );
-  return rows.map(rowToEntry);
+  const entries = rows.map(rowToEntry);
+  if (!tag) return entries;
+  const needle = tag.toLowerCase();
+  return entries.filter((e) =>
+    e.tags.some((t) => t.slug?.toLowerCase() === needle || t.label.toLowerCase() === needle)
+  );
+}
+
+/** Derives the account's tag list from whatever entries are cached locally — the
+ * offline fallback when a live GET /api/tags.json isn't reachable. Not a perfect
+ * substitute (tags on entries that were never fetched won't appear) but real data,
+ * not an empty screen. */
+export async function getCachedTags(): Promise<WallabagTag[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ tags_json: string }>('SELECT tags_json FROM entries');
+  const byId = new Map<number, WallabagTag>();
+  for (const row of rows) {
+    const tags: WallabagTag[] = JSON.parse(row.tags_json ?? '[]');
+    for (const t of tags) {
+      if (!byId.has(t.id)) byId.set(t.id, t);
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export async function getCachedEntry(id: number): Promise<WallabagEntry | null> {

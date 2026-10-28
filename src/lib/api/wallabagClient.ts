@@ -4,6 +4,7 @@ import type {
   TokenResponse,
   WallabagCredentials,
   WallabagEntry,
+  WallabagTag,
 } from './types';
 import { WallabagApiError } from './types';
 
@@ -224,6 +225,34 @@ export class WallabagClient {
   async deleteEntry(id: number): Promise<void> {
     const res = await this.authedFetch(`/api/entries/${id}.json`, { method: 'DELETE' });
     if (!res.ok) throw new WallabagApiError(`Could not delete article (${res.status})`, res.status);
+  }
+
+  /** All tags across the whole account (https://doc.wallabag.org — GET /api/tags). */
+  async fetchTags(): Promise<WallabagTag[]> {
+    const res = await this.authedFetch('/api/tags.json');
+    if (!res.ok) throw new WallabagApiError(`Could not load tags (${res.status})`, res.status);
+    return res.json();
+  }
+
+  /** Adds one or more comma-separated tag labels to an entry; server creates tags that
+   * don't exist yet and returns the entry with its full, updated tag list. */
+  async addTagsToEntry(entryId: number, tagsCsv: string): Promise<WallabagEntry> {
+    const body = new URLSearchParams({ tags: tagsCsv });
+    const res = await this.authedFetch(`/api/entries/${entryId}/tags.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    if (!res.ok) throw new WallabagApiError(`Could not add tag (${res.status})`, res.status);
+    return res.json();
+  }
+
+  async removeTagFromEntry(entryId: number, tagId: number): Promise<WallabagEntry> {
+    const res = await this.authedFetch(`/api/entries/${entryId}/tags/${tagId}.json`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new WallabagApiError(`Could not remove tag (${res.status})`, res.status);
+    return res.json();
   }
 }
 

@@ -1,8 +1,9 @@
 import type { WallabagClient } from './api/wallabagClient';
-import type { EntryFilter, WallabagEntry } from './api/types';
+import type { EntryFilter, WallabagEntry, WallabagTag } from './api/types';
 import {
   getCachedEntries,
   getCachedEntry,
+  getCachedTags,
   queuePendingAction,
   removeCachedEntry,
   updateCachedFlags,
@@ -16,23 +17,68 @@ export type EntriesResult = {
   fromCache: boolean;
 };
 
+export type TagsResult = {
+  items: WallabagTag[];
+  fromCache: boolean;
+};
+
 /** List entries, preferring live data but always falling back to the local SQLite
- * cache when the network/server is unreachable — the core "works offline" promise. */
+ * cache when the network/server is unreachable — the core "works offline" promise.
+ * `tag` (a tag label or slug) narrows the list to entries carrying that tag, same as
+ * the Unread/Starred/Archived filters, and composes with them. */
 export async function listEntries(
   client: WallabagClient,
-  filter: EntryFilter
+  filter: EntryFilter,
+  tag?: string
 ): Promise<EntriesResult> {
   try {
-    const page = await client.fetchEntries({ filter, perPage: 50 });
+    const page = await client.fetchEntries({ filter, perPage: 50, tag });
     await upsertEntries(page.items);
     return { items: page.items, fromCache: false };
   } catch (err) {
-    const cached = await getCachedEntries(filter);
+    const cached = await getCachedEntries(filter, tag);
     if (cached.length > 0) {
       return { items: cached, fromCache: true };
     }
     throw err;
   }
+}
+
+/** Lists every tag in the account, preferring the live server list but falling back
+ * to tags derived from whatever is cached offline. */
+export async function listTags(client: WallabagClient): Promise<TagsResult> {
+  try {
+    const tags = await client.fetchTags();
+    return { items: tags, fromCache: false };
+  } catch (err) {
+    const cached = await getCachedTags();
+    if (cached.length > 0) {
+      return { items: cached, fromCache: true };
+    }
+    throw err;
+  }
+}
+
+/** Adds a tag (by free-text label, server creates it if new) to an entry and
+ * refreshes the local cache with the server's authoritative, updated entry. */
+export async function addTagToEntry(
+  client: WallabagClient,
+  entry: WallabagEntry,
+  label: string
+): Promise<WallabagEntry> {
+  const updated = await client.addTagsToEntry(entry.id, label);
+  await upsertEntries([updated]);
+  return updated;
+}
+
+export async function removeTagFromEntry(
+  client: WallabagClient,
+  entry: WallabagEntry,
+  tagId: number
+): Promise<WallabagEntry> {
+  const updated = await client.removeTagFromEntry(entry.id, tagId);
+  await upsertEntries([updated]);
+  return updated;
 }
 
 /** Load a single entry's full content, preferring live data (content is only ever

@@ -1,14 +1,30 @@
 import { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  ActivityIndicator,
+  StyleSheet,
+  Alert,
+} from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
 import { useAuthStore } from '../../lib/auth/authStore';
 import { useTheme } from '../../lib/useTheme';
-import { spacing, typography } from '../../lib/theme';
+import { radius, spacing, typography } from '../../lib/theme';
 import { IconButton } from '../../components/IconButton';
 import { EmptyState } from '../../components/EmptyState';
-import { loadEntry, removeEntry, toggleArchive, toggleStar } from '../../lib/entriesRepository';
+import {
+  addTagToEntry,
+  loadEntry,
+  removeEntry,
+  removeTagFromEntry,
+  toggleArchive,
+  toggleStar,
+} from '../../lib/entriesRepository';
 import type { WallabagEntry } from '../../lib/api/types';
 import { getErrorMessage } from '../../lib/errors';
 
@@ -56,6 +72,9 @@ export default function EntryDetail() {
   const [offline, setOffline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [newTag, setNewTag] = useState('');
+  const [tagBusy, setTagBusy] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!client) return;
@@ -96,6 +115,36 @@ export default function EntryDetail() {
     ]);
   };
 
+  const onAddTag = async () => {
+    const label = newTag.trim();
+    if (!client || !entry || !label) return;
+    setTagBusy(true);
+    setTagError(null);
+    try {
+      const updated = await addTagToEntry(client, entry, label);
+      setEntry(updated);
+      setNewTag('');
+    } catch (err: unknown) {
+      setTagError(getErrorMessage(err, 'Could not add that tag.'));
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  const onRemoveTag = async (tagId: number) => {
+    if (!client || !entry) return;
+    setTagBusy(true);
+    setTagError(null);
+    try {
+      const updated = await removeTagFromEntry(client, entry, tagId);
+      setEntry(updated);
+    } catch (err: unknown) {
+      setTagError(getErrorMessage(err, 'Could not remove that tag.'));
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top }}>
       <View style={styles.header}>
@@ -134,6 +183,47 @@ export default function EntryDetail() {
         </View>
       </View>
 
+      {entry ? (
+        <View style={[styles.tagsSection, { borderBottomColor: c.border }]}>
+          <View style={styles.tagsWrap}>
+            {entry.tags.map((t) => (
+              <View key={t.id} style={[styles.tagChip, { backgroundColor: c.surfaceAlt, borderColor: c.border }]}>
+                <Text style={[typography.tiny, { color: c.textMuted }]}>{t.label.toUpperCase()}</Text>
+                <Pressable
+                  testID={`detail-remove-tag-${t.id}`}
+                  onPress={() => onRemoveTag(t.id)}
+                  disabled={tagBusy}
+                  hitSlop={6}
+                >
+                  <Feather name="x" size={11} color={c.textMuted} />
+                </Pressable>
+              </View>
+            ))}
+            <View style={[styles.tagInputRow, { borderColor: c.border }]}>
+              <TextInput
+                testID="detail-add-tag-input"
+                value={newTag}
+                onChangeText={setNewTag}
+                onSubmitEditing={onAddTag}
+                placeholder="Add tag"
+                placeholderTextColor={c.textFaint}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[typography.tiny, { color: c.text, minWidth: 64 }]}
+              />
+              {newTag.trim() ? (
+                <Pressable testID="detail-add-tag-submit" onPress={onAddTag} disabled={tagBusy} hitSlop={6}>
+                  <Feather name="plus" size={14} color={c.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+          {tagError ? (
+            <Text style={[typography.caption, { color: c.danger, marginTop: spacing.xs }]}>{tagError}</Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={c.text} />
@@ -144,7 +234,7 @@ export default function EntryDetail() {
         <WebView
           originWhitelist={['*']}
           source={{ html: buildHtml(entry, dark) }}
-          style={{ backgroundColor: c.background }}
+          style={{ backgroundColor: c.background, flex: 1 }}
         />
       )}
     </View>
@@ -158,5 +248,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.sm,
     paddingBottom: spacing.xs,
+  },
+  tagsSection: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+  },
+  tagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  tagChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  tagInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderStyle: 'dashed',
   },
 });
