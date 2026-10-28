@@ -2,6 +2,8 @@ import type {
   EntriesPage,
   EntryFilter,
   TokenResponse,
+  WallabagAnnotation,
+  WallabagAnnotationRange,
   WallabagCredentials,
   WallabagEntry,
   WallabagTag,
@@ -253,6 +255,56 @@ export class WallabagClient {
     });
     if (!res.ok) throw new WallabagApiError(`Could not remove tag (${res.status})`, res.status);
     return res.json();
+  }
+
+  /** All highlights (Wallabag's "annotations") saved on one article
+   * (`GET /api/annotations/{entry}.json` — Annotator.js-schema rows,
+   * https://doc.wallabag.org). */
+  async fetchAnnotations(entryId: number): Promise<WallabagAnnotation[]> {
+    const res = await this.authedFetch(`/api/annotations/${entryId}.json`);
+    if (!res.ok) throw new WallabagApiError(`Could not load highlights (${res.status})`, res.status);
+    const json = await res.json();
+    return (json.rows ?? []) as WallabagAnnotation[];
+  }
+
+  /** Saves a new highlight on an article (`POST /api/annotations/{entry}.json`).
+   * `text` is an optional note attached to the highlight; Wallabag stores it even
+   * when empty. `quote` is the highlighted text itself, `ranges` locate it in the
+   * article's HTML so it can be re-rendered later. */
+  async createAnnotation(
+    entryId: number,
+    annotation: { quote: string; text?: string; ranges: WallabagAnnotationRange[] }
+  ): Promise<WallabagAnnotation> {
+    const res = await this.authedFetch(`/api/annotations/${entryId}.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: annotation.text ?? '',
+        quote: annotation.quote,
+        ranges: annotation.ranges,
+      }),
+    });
+    if (!res.ok) throw new WallabagApiError(`Could not save highlight (${res.status})`, res.status);
+    return res.json();
+  }
+
+  /** Updates a highlight's note text (`PUT /api/annotations/{annotation}.json`). */
+  async updateAnnotation(annotationId: number, text: string): Promise<WallabagAnnotation> {
+    const res = await this.authedFetch(`/api/annotations/${annotationId}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) throw new WallabagApiError(`Could not update highlight (${res.status})`, res.status);
+    return res.json();
+  }
+
+  /** Removes a highlight (`DELETE /api/annotations/{annotation}.json`). */
+  async deleteAnnotation(annotationId: number): Promise<void> {
+    const res = await this.authedFetch(`/api/annotations/${annotationId}.json`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new WallabagApiError(`Could not remove highlight (${res.status})`, res.status);
   }
 }
 

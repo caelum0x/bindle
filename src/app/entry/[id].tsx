@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentProps, type ComponentType, type Ref } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
-import { WebView } from 'react-native-webview';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useAuthStore } from '../../lib/auth/authStore';
@@ -25,8 +25,29 @@ import {
   toggleArchive,
   toggleStar,
 } from '../../lib/entriesRepository';
-import type { WallabagEntry } from '../../lib/api/types';
+import {
+  createHighlight,
+  deleteHighlight,
+  loadAnnotations,
+} from '../../lib/annotationsRepository';
+import { buildHighlightScript } from '../../lib/annotations/highlightScript';
+import type { WallabagAnnotation, WallabagEntry } from '../../lib/api/types';
 import { getErrorMessage } from '../../lib/errors';
+
+type HighlightMessage =
+  | { type: 'createHighlight'; quote: string; ranges: WallabagAnnotation['ranges'] }
+  | { type: 'deleteHighlightRequest'; id: number };
+
+// react-native-webview's shipped types resolve (under plain `tsc`, which can't follow
+// its .ios.d.ts/.android.d.ts platform-specific forwardRef typings the way Metro does
+// at bundle time) to a plain, non-ref-forwarding FunctionComponent type — so passing a
+// real `ref` fails type-checking even though it works at runtime on every platform.
+// This single cast bridges that known upstream typing gap; every other prop below is
+// still checked against the library's real prop types.
+type WebViewHandle = { injectJavaScript: (script: string) => void };
+const RefCapableWebView = WebView as unknown as ComponentType<
+  ComponentProps<typeof WebView> & { ref?: Ref<WebViewHandle> }
+>;
 
 function buildHtml(entry: WallabagEntry, dark: boolean): string {
   const bg = dark ? '#0B0B0B' : '#FFFFFF';
@@ -47,12 +68,13 @@ function buildHtml(entry: WallabagEntry, dark: boolean): string {
   .bindle-title { font-size: 26px; font-weight: 700; margin-bottom: 8px; }
   blockquote { border-left: 3px solid ${muted}; margin-left:0; padding-left:14px; color:${muted}; }
   pre, code { white-space: pre-wrap; }
+  mark.bindle-highlight { background:${dark ? '#3A3A3A' : '#E5E5E5'}; color:${fg}; border-radius:2px; }
 </style>
 </head>
 <body>
   <div class="bindle-title">${escapeHtml(entry.title || '(untitled)')}</div>
   <div class="bindle-meta">${entry.domain_name ?? ''}</div>
-  ${entry.content ?? '<p>No content was saved for this article.</p>'}
+  <div id="bindle-content">${entry.content ?? '<p>No content was saved for this article.</p>'}</div>
 </body>
 </html>`;
 }
@@ -75,6 +97,8 @@ export default function EntryDetail() {
   const [newTag, setNewTag] = useState('');
   const [tagBusy, setTagBusy] = useState(false);
   const [tagError, setTagError] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<WallabagAnnotation[]>([]);
+  const webViewRef = useRef<WebViewHandle>(null);
 
   useEffect(() => {
     if (!client) return;
@@ -86,6 +110,53 @@ export default function EntryDetail() {
       .catch((err: unknown) => setError(getErrorMessage(err, 'Could not load this article.')))
       .finally(() => setLoading(false));
   }, [client, entryId]);
+
+  useEffect(() => {
+    if (!client) return;
+    loadAnnotations(client, entryId)
+      .then(({ items }) => setAnnotations(items))
+      .catch(() => {
+        // No highlights yet, or server/offline fetch failed — reader still works.
+      });
+  }, [client, entryId]);
+
+  const renderHighlightsInWebView = () => {
+    const payload = JSON.stringify(JSON.stringify(annotations));
+    webViewRef.current?.injectJavaScript(
+      `window.bindleRenderHighlights && window.bindleRenderHighlights(${payload});true;`
+    );
+  };
+
+  useEffect(() => {
+    renderHighlightsInWebView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [annotations]);
+
+  const onWebViewMessage = async (event: WebViewMessageEvent) => {
+    if (!client || !entry) return;
+    let message: HighlightMessage;
+    try {
+      message = JSON.parse(event.nativeEvent.data) as HighlightMessage;
+    } catch {
+      return;
+    }
+    if (message.type === 'createHighlight') {
+      const created = await createHighlight(client, entry.id, message.quote, message.ranges);
+      setAnnotations((prev) => [...prev, created]);
+    } else if (message.type === 'deleteHighlightRequest') {
+      Alert.alert('Remove highlight', 'Delete this saved highlight?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteHighlight(client, message.id);
+            setAnnotations((prev) => prev.filter((a) => a.id !== message.id));
+          },
+        },
+      ]);
+    }
+  };
 
   const onToggleStar = async () => {
     if (!client || !entry) return;
@@ -231,10 +302,14 @@ export default function EntryDetail() {
       ) : error || !entry ? (
         <EmptyState icon="alert-triangle" title="Couldn't open this article" subtitle={error ?? undefined} />
       ) : (
-        <WebView
+        <RefCapableWebView
+          ref={webViewRef}
           originWhitelist={['*']}
           source={{ html: buildHtml(entry, dark) }}
           style={{ backgroundColor: c.background, flex: 1 }}
+          injectedJavaScript={buildHighlightScript(dark)}
+          onMessage={onWebViewMessage}
+          onLoadEnd={renderHighlightsInWebView}
         />
       )}
     </View>

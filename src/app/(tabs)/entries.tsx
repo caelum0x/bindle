@@ -11,6 +11,7 @@ import { EntryCard } from '../../components/EntryCard';
 import { EmptyState } from '../../components/EmptyState';
 import type { EntryFilter, WallabagEntry } from '../../lib/api/types';
 import { flushPendingActions, listEntries, toggleArchive, toggleStar } from '../../lib/entriesRepository';
+import { flushPendingAnnotations } from '../../lib/annotationsRepository';
 import { getErrorMessage } from '../../lib/errors';
 
 export default function Entries() {
@@ -55,6 +56,7 @@ export default function Entries() {
         setOffline(result.fromCache);
         if (!result.fromCache) {
           flushPendingActions(client).catch(() => {});
+          flushPendingAnnotations(client).catch(() => {});
         }
       } catch (err: unknown) {
         setError(getErrorMessage(err, 'Something went wrong.'));

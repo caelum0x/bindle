@@ -51,6 +51,28 @@ export type EntriesPage = {
 
 export type EntryFilter = 'all' | 'unread' | 'archived' | 'starred';
 
+/** One Annotator.js-schema range (https://doc.wallabag.org — the shape Wallabag's own
+ * official web client sends/stores): `start`/`end` are relative XPath-style paths from
+ * the article's content root to the text node the highlight starts/ends in,
+ * `startOffset`/`endOffset` are character offsets into that text node. */
+export type WallabagAnnotationRange = {
+  start: string;
+  startOffset: number;
+  end: string;
+  endOffset: number;
+};
+
+export type WallabagAnnotation = {
+  id: number;
+  text: string;
+  quote: string;
+  ranges: WallabagAnnotationRange[];
+  created_at: string;
+  updated_at: string;
+  user?: string;
+  annotator_schema_version?: string;
+};
+
 export class WallabagApiError extends Error {
   status?: number;
   constructor(message: string, status?: number) {

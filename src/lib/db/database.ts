@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import type { EntryFilter, WallabagEntry, WallabagTag } from '../api/types';
+import type { EntryFilter, WallabagAnnotation, WallabagEntry, WallabagTag } from '../api/types';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -27,6 +27,25 @@ function getDb() {
           entry_id INTEGER NOT NULL,
           action TEXT NOT NULL,
           value INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS annotations (
+          id INTEGER PRIMARY KEY,
+          entry_id INTEGER NOT NULL,
+          text TEXT NOT NULL DEFAULT '',
+          quote TEXT NOT NULL,
+          ranges_json TEXT NOT NULL,
+          created_at TEXT,
+          updated_at TEXT,
+          cached_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pending_annotations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          local_id INTEGER NOT NULL,
+          entry_id INTEGER NOT NULL,
+          text TEXT NOT NULL DEFAULT '',
+          quote TEXT NOT NULL,
+          ranges_json TEXT NOT NULL,
           created_at INTEGER NOT NULL
         );
       `);
@@ -151,9 +170,108 @@ export async function clearPendingAction(id: number): Promise<void> {
   await db.runAsync('DELETE FROM pending_actions WHERE id = ?', [id]);
 }
 
+/** Caches the server's authoritative highlight list for one article, so the reader
+ * screen can re-render highlights offline too (same write-through pattern as entries). */
+export async function upsertAnnotations(entryId: number, items: WallabagAnnotation[]): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM annotations WHERE entry_id = ?', [entryId]);
+    for (const item of items) {
+      await db.runAsync(
+        `INSERT INTO annotations (id, entry_id, text, quote, ranges_json, created_at, updated_at, cached_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          item.id,
+          entryId,
+          item.text ?? '',
+          item.quote,
+          JSON.stringify(item.ranges ?? []),
+          item.created_at,
+          item.updated_at,
+          Date.now(),
+        ]
+      );
+    }
+  });
+}
+
+type AnnotationRow = {
+  id: number;
+  entry_id: number;
+  text: string;
+  quote: string;
+  ranges_json: string;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+function rowToAnnotation(row: AnnotationRow): WallabagAnnotation {
+  return {
+    id: row.id,
+    text: row.text,
+    quote: row.quote,
+    ranges: JSON.parse(row.ranges_json ?? '[]'),
+    created_at: row.created_at ?? '',
+    updated_at: row.updated_at ?? '',
+  };
+}
+
+export async function getCachedAnnotations(entryId: number): Promise<WallabagAnnotation[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<AnnotationRow>(
+    'SELECT * FROM annotations WHERE entry_id = ? ORDER BY created_at ASC',
+    [entryId]
+  );
+  return rows.map(rowToAnnotation);
+}
+
+export async function removeCachedAnnotation(id: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM annotations WHERE id = ?', [id]);
+}
+
+/** Queues a highlight created while offline. `localId` is a negative placeholder id
+ * (so it can be rendered/removed locally before the server assigns the real one). */
+export async function queuePendingAnnotation(
+  localId: number,
+  entryId: number,
+  quote: string,
+  text: string,
+  ranges: WallabagAnnotation['ranges']
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'INSERT INTO pending_annotations (local_id, entry_id, text, quote, ranges_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [localId, entryId, text, quote, JSON.stringify(ranges), Date.now()]
+  );
+}
+
+type PendingAnnotationRow = {
+  id: number;
+  local_id: number;
+  entry_id: number;
+  text: string;
+  quote: string;
+  ranges_json: string;
+};
+
+export async function getPendingAnnotations(): Promise<PendingAnnotationRow[]> {
+  const db = await getDb();
+  return db.getAllAsync<PendingAnnotationRow>(
+    'SELECT * FROM pending_annotations ORDER BY created_at ASC'
+  );
+}
+
+export async function clearPendingAnnotation(id: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM pending_annotations WHERE id = ?', [id]);
+}
+
 export async function clearCache(): Promise<void> {
   const db = await getDb();
-  await db.execAsync('DELETE FROM entries; DELETE FROM pending_actions;');
+  await db.execAsync(
+    'DELETE FROM entries; DELETE FROM pending_actions; DELETE FROM annotations; DELETE FROM pending_annotations;'
+  );
 }
 
 type EntryRow = {
