@@ -80,7 +80,11 @@ export async function createHighlight(
  * id) is simply dropped from the queue; a real server-side highlight is deleted live
  * — there is no safe offline-delete queue for those, since the id must be confirmed
  * by the server first (same boundary the rest of the app draws for delete-while-
- * offline), so this surfaces the real error to the caller instead of silently no-op. */
+ * offline), so this surfaces the real error to the caller instead of silently no-op.
+ * The server delete must run *before* the local cache row is dropped: if it fails
+ * (offline, DNS failure, a 500, a revoked token), the cached copy must survive so the
+ * highlight doesn't silently disappear next time it's rendered from the offline cache
+ * — same ordering fix already applied to article deletion in `entriesRepository.ts`. */
 export async function deleteHighlight(client: WallabagClient, annotationId: number): Promise<void> {
   if (annotationId < 0) {
     const pending = await getPendingAnnotations();
@@ -88,8 +92,8 @@ export async function deleteHighlight(client: WallabagClient, annotationId: numb
     if (match) await clearPendingAnnotation(match.id);
     return;
   }
-  await removeCachedAnnotation(annotationId);
   await client.deleteAnnotation(annotationId);
+  await removeCachedAnnotation(annotationId);
 }
 
 /** Replays highlights created while offline. Call alongside `flushPendingActions`. */

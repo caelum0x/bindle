@@ -150,8 +150,15 @@ export default function EntryDetail() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await deleteHighlight(client, message.id);
-            setAnnotations((prev) => prev.filter((a) => a.id !== message.id));
+            try {
+              await deleteHighlight(client, message.id);
+              setAnnotations((prev) => prev.filter((a) => a.id !== message.id));
+            } catch (err: unknown) {
+              Alert.alert(
+                'Could not remove highlight',
+                getErrorMessage(err, 'Check your connection and try again.')
+              );
+            }
           },
         },
       ]);
