@@ -179,8 +179,12 @@ export default function EntryDetail() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await removeEntry(client, entry.id);
-          router.back();
+          try {
+            await removeEntry(client, entry.id);
+            router.back();
+          } catch (err: unknown) {
+            Alert.alert('Could not delete', getErrorMessage(err, 'Check your connection and try again.'));
+          }
         },
       },
     ]);

@@ -129,9 +129,13 @@ export async function toggleStar(client: WallabagClient, entry: WallabagEntry): 
   }
 }
 
+/** Deletes an article from the server first, only clearing the local cache once the
+ * server confirms it's gone. A failed/offline delete must leave the cached copy intact
+ * — otherwise it would silently wipe the user's only offline copy of an article the
+ * server never actually deleted. */
 export async function removeEntry(client: WallabagClient, id: number): Promise<void> {
-  await removeCachedEntry(id);
   await client.deleteEntry(id);
+  await removeCachedEntry(id);
 }
 
 /** Replays any archive/star changes made while offline. Call this on app foreground
