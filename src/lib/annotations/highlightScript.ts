@@ -158,6 +158,8 @@ export function buildHighlightScript(dark: boolean): string {
     var quote = pendingRange.toString();
     var startPath = nodeToPath(pendingRange.startContainer);
     var endPath = nodeToPath(pendingRange.endContainer);
+    var startOffset = pendingRange.startOffset;
+    var endOffset = pendingRange.endOffset;
     hideButton();
     window.getSelection().removeAllRanges();
     if (!quote.trim() || !startPath || !endPath) return;
@@ -166,9 +168,9 @@ export function buildHighlightScript(dark: boolean): string {
       quote: quote,
       ranges: [{
         start: startPath,
-        startOffset: pendingRange.startOffset,
+        startOffset: startOffset,
         end: endPath,
-        endOffset: pendingRange.endOffset,
+        endOffset: endOffset,
       }],
     });
   }
