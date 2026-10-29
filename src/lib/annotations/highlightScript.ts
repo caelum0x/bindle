@@ -1,10 +1,23 @@
 // Injected into the article WebView to turn a text selection into a real Wallabag
 // highlight ("annotation") and to re-render highlights already saved on the server.
-// Original code — not vendored from anywhere. The range format produced here
-// (relative XPath `start`/`end` + `startOffset`/`endOffset`) matches the Annotator.js
-// schema Wallabag's own API expects (https://doc.wallabag.org, GET/POST
-// /api/annotations/{entry}.json), confirmed by reading the real
-// wallabag/wallabag Entity/Annotation.php + Form/Type/RangeType.php source.
+// Original code — not vendored from anywhere.
+//
+// Range addressing: `startOffset`/`endOffset` are absolute character offsets into the
+// article root's full visible text (`start`/`end` are unused placeholders, kept only
+// to satisfy the `WallabagAnnotationRange` shape shared with Wallabag's own
+// Annotator.js-schema fields — https://doc.wallabag.org, GET/POST
+// /api/annotations/{entry}.json; the server stores `ranges` as an opaque blob it never
+// interprets, so Bindle is free to define its own meaning here). An earlier version
+// used relative-XPath sibling-node-index paths instead (closer to Wallabag's web
+// client's own Annotator.js format) but that broke as soon as two highlights shared a
+// paragraph: wrapping/unwrapping one highlight's `<mark>` shifts the sibling text-node
+// index every *other* highlight in the same paragraph was anchored to, so e.g.
+// deleting one highlight silently un-rendered any later highlight sharing its
+// paragraph even though it was never deleted. Character offsets are counted by
+// walking all text nodes in document order, which is unaffected by `<mark>` wrapping
+// (wrapping text doesn't add/remove characters or reorder text nodes), so they stay
+// correct regardless of how many sibling highlights currently exist, their render
+// order, or deletions — found via a real repro in /tmp/bindle-repro2, 2026-10-29.
 
 /** Returns the full `<script>` body injected once per article load (via
  * `injectedJavaScript`). Builds the selection → highlight-button → postMessage flow
@@ -31,77 +44,49 @@ export function buildHighlightScript(dark: boolean): string {
     return document.getElementById('bindle-content');
   }
 
-  // --- Range <-> relative-XPath serialization (Annotator.js-compatible shape) ---
+  // --- Range <-> absolute character-offset serialization (see file header) ---
 
-  function kindOf(node) {
-    return node.nodeType === 3 ? 'text()' : node.nodeName.toLowerCase();
-  }
-
-  function siblingIndex(node) {
-    var kind = kindOf(node);
-    var i = 0;
-    var sib = node.parentNode ? node.parentNode.childNodes : [];
-    for (var k = 0; k < sib.length; k++) {
-      var n = sib[k];
-      if (kindOf(n) === kind) {
-        i++;
-        if (n === node) return i;
-      }
-    }
-    return i;
-  }
-
-  function nodeToPath(node) {
+  function allTextNodes() {
     var r = root();
-    if (!r) return null;
-    var parts = [];
-    var cur = node;
-    while (cur && cur !== r) {
-      var parent = cur.parentNode;
-      if (!parent) return null;
-      parts.unshift(kindOf(cur) + '[' + siblingIndex(cur) + ']');
-      cur = parent;
-    }
-    return '/' + parts.join('/');
+    var nodes = [];
+    if (!r) return nodes;
+    var walker = document.createTreeWalker(r, NodeFilter.SHOW_TEXT, null);
+    var n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    return nodes;
   }
 
-  function pathToNode(path) {
-    var r = root();
-    if (!r || !path) return null;
-    var segments = path.split('/').filter(Boolean);
-    var cur = r;
-    for (var s = 0; s < segments.length; s++) {
-      var m = segments[s].match(/^(text\\(\\)|[a-zA-Z0-9_-]+)\\[(\\d+)\\]$/);
-      if (!m) return null;
-      var kind = m[1];
-      var index = parseInt(m[2], 10);
-      var count = 0;
-      var next = null;
-      var children = cur.childNodes;
-      for (var c = 0; c < children.length; c++) {
-        if (kindOf(children[c]) === kind) {
-          count++;
-          if (count === index) { next = children[c]; break; }
-        }
-      }
-      if (!next) return null;
-      cur = next;
+  function textOffsetOf(node, offset) {
+    var nodes = allTextNodes();
+    var total = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i] === node) return total + offset;
+      total += nodes[i].length;
     }
-    return cur;
+    return total;
+  }
+
+  function nodeAtTextOffset(target) {
+    var nodes = allTextNodes();
+    var total = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      var len = nodes[i].length;
+      if (target <= total + len) return { node: nodes[i], offset: target - total };
+      total += len;
+    }
+    return null;
   }
 
   function rangeFromAnnotation(ann) {
     var r0 = ann.ranges && ann.ranges[0];
     if (!r0) return null;
-    var startNode = pathToNode(r0.start);
-    var endNode = pathToNode(r0.end);
-    if (!startNode || !endNode) return null;
+    var startPos = nodeAtTextOffset(r0.startOffset);
+    var endPos = nodeAtTextOffset(r0.endOffset);
+    if (!startPos || !endPos) return null;
     var range = document.createRange();
     try {
-      var startLen = startNode.nodeType === 3 ? startNode.length : startNode.childNodes.length;
-      var endLen = endNode.nodeType === 3 ? endNode.length : endNode.childNodes.length;
-      range.setStart(startNode, Math.min(r0.startOffset, startLen));
-      range.setEnd(endNode, Math.min(r0.endOffset, endLen));
+      range.setStart(startPos.node, startPos.offset);
+      range.setEnd(endPos.node, endPos.offset);
       return range;
     } catch (e) {
       return null;
@@ -156,20 +141,18 @@ export function buildHighlightScript(dark: boolean): string {
     e.preventDefault();
     if (!pendingRange) return;
     var quote = pendingRange.toString();
-    var startPath = nodeToPath(pendingRange.startContainer);
-    var endPath = nodeToPath(pendingRange.endContainer);
-    var startOffset = pendingRange.startOffset;
-    var endOffset = pendingRange.endOffset;
+    var startOffset = textOffsetOf(pendingRange.startContainer, pendingRange.startOffset);
+    var endOffset = textOffsetOf(pendingRange.endContainer, pendingRange.endOffset);
     hideButton();
     window.getSelection().removeAllRanges();
-    if (!quote.trim() || !startPath || !endPath) return;
+    if (!quote.trim()) return;
     post({
       type: 'createHighlight',
       quote: quote,
       ranges: [{
-        start: startPath,
+        start: '',
         startOffset: startOffset,
-        end: endPath,
+        end: '',
         endOffset: endOffset,
       }],
     });

@@ -51,10 +51,13 @@ export type EntriesPage = {
 
 export type EntryFilter = 'all' | 'unread' | 'archived' | 'starred';
 
-/** One Annotator.js-schema range (https://doc.wallabag.org — the shape Wallabag's own
- * official web client sends/stores): `start`/`end` are relative XPath-style paths from
- * the article's content root to the text node the highlight starts/ends in,
- * `startOffset`/`endOffset` are character offsets into that text node. */
+/** One highlight range. Shape matches Wallabag's Annotator.js-schema `ranges` field
+ * (https://doc.wallabag.org — opaque to the server, stored/returned verbatim), but
+ * Bindle defines its own meaning for the fields: `startOffset`/`endOffset` are
+ * absolute character offsets into the article root's full visible text; `start`/`end`
+ * are unused placeholders kept only for shape compatibility. See the header comment in
+ * `src/lib/annotations/highlightScript.ts` for why (a per-node relative-XPath scheme
+ * broke when two highlights shared a paragraph). */
 export type WallabagAnnotationRange = {
   start: string;
   startOffset: number;
