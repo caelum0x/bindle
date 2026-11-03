@@ -150,9 +150,24 @@ export async function loadEntry(
   }
 }
 
+/** Saves a URL to Wallabag. Used by both the main app's Add screen (paste-a-URL
+ * flow) and the iOS share extension (`src/ShareExtension.tsx`) — the exact same
+ * function, not a duplicated save path, since it's the real authoritative save
+ * logic this app already relies on.
+ *
+ * The local-cache write is best-effort and intentionally does not fail the save:
+ * the server already has the entry once `client.saveEntry` resolves, so a cache
+ * write that throws afterward (e.g. a sandbox the share extension process can't
+ * fully write to, or any other local-storage hiccup) must not be reported to the
+ * caller as "the save failed" — that would risk the user retrying and creating a
+ * duplicate server-side entry for something that already saved correctly. */
 export async function saveLink(client: WallabagClient, url: string): Promise<WallabagEntry> {
   const entry = await client.saveEntry(url);
-  await upsertEntries([entry]);
+  try {
+    await upsertEntries([entry]);
+  } catch {
+    // Server save already succeeded; a failed local cache write is not a save failure.
+  }
   return entry;
 }
 

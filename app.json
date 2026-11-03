@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.bindle.mobile"
+      "bundleIdentifier": "app.bindle.mobile",
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.app.bindle.mobile"],
+        "keychain-access-groups": ["group.app.bindle.mobile"]
+      }
     },
     "android": {
       "package": "app.bindle.mobile",
@@ -40,7 +44,23 @@
           "icon": "./assets/icon.png"
         }
       ],
-      "expo-font"
+      "expo-font",
+      "./plugins/withShareExtensionKeychainAccessGroup",
+      [
+        "expo-share-extension",
+        {
+          "activationRules": [
+            { "type": "url", "max": 1 },
+            { "type": "text" }
+          ],
+          "excludedPackages": [
+            "expo-notifications",
+            "expo-clipboard",
+            "react-native-webview",
+            "react-native-screens"
+          ]
+        }
+      ]
     ]
   }
 }

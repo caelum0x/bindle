@@ -18,10 +18,7 @@ import { useTheme } from '../../lib/useTheme';
 import { radius, spacing, typography } from '../../lib/theme';
 import { saveLink } from '../../lib/entriesRepository';
 import { getErrorMessage } from '../../lib/errors';
-
-function looksLikeUrl(value: string): boolean {
-  return /^https?:\/\/\S+\.\S+/i.test(value.trim());
-}
+import { looksLikeUrl } from '../../lib/url';
 
 export default function Add() {
   const { c } = useTheme();

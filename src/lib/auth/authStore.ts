@@ -1,20 +1,7 @@
-import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
-import { WallabagClient, type StoredTokens, type TokenPersistence } from '../api/wallabagClient';
+import type { WallabagClient } from '../api/wallabagClient';
 import type { WallabagCredentials } from '../api/types';
-
-const CREDENTIALS_KEY = 'bindle.credentials.v1';
-const TOKENS_KEY = 'bindle.tokens.v1';
-
-const tokenPersistence: TokenPersistence = {
-  async read() {
-    const raw = await SecureStore.getItemAsync(TOKENS_KEY);
-    return raw ? (JSON.parse(raw) as StoredTokens) : null;
-  },
-  async write(tokens) {
-    await SecureStore.setItemAsync(TOKENS_KEY, JSON.stringify(tokens));
-  },
-};
+import { clearStoredAuth, createClient, loadStoredClient, writeStoredCredentials } from './sharedAuth';
 
 type AuthStatus = 'checking' | 'signedOut' | 'signedIn';
 
@@ -35,25 +22,23 @@ export const useAuthStore = create<AuthState>((set) => ({
   serverLabel: null,
 
   restore: async () => {
-    const raw = await SecureStore.getItemAsync(CREDENTIALS_KEY);
-    if (!raw) {
+    const stored = await loadStoredClient();
+    if (!stored) {
       set({ status: 'signedOut' });
       return;
     }
-    const credentials = JSON.parse(raw) as WallabagCredentials;
-    const client = new WallabagClient(credentials, tokenPersistence);
     set({
       status: 'signedIn',
-      credentials,
-      client,
-      serverLabel: hostOf(credentials.serverUrl),
+      credentials: stored.credentials,
+      client: stored.client,
+      serverLabel: hostOf(stored.credentials.serverUrl),
     });
   },
 
   connect: async (credentials: WallabagCredentials) => {
-    const client = new WallabagClient(credentials, tokenPersistence);
+    const client = createClient(credentials);
     await client.testConnection();
-    await SecureStore.setItemAsync(CREDENTIALS_KEY, JSON.stringify(credentials));
+    await writeStoredCredentials(credentials);
     set({
       status: 'signedIn',
       credentials,
@@ -63,8 +48,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
-    await SecureStore.deleteItemAsync(CREDENTIALS_KEY);
-    await SecureStore.deleteItemAsync(TOKENS_KEY);
+    await clearStoredAuth();
     set({ status: 'signedOut', credentials: null, client: null, serverLabel: null });
   },
 }));
