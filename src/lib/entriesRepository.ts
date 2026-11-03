@@ -6,11 +6,13 @@ import {
   getCachedTags,
   queuePendingAction,
   removeCachedEntry,
+  searchCachedEntries,
   updateCachedFlags,
   upsertEntries,
   getPendingActions,
   clearPendingAction,
 } from './db/database';
+import { matchesQuery } from './search';
 
 export type EntriesResult = {
   items: WallabagEntry[];
@@ -57,6 +59,56 @@ export async function listTags(client: WallabagClient): Promise<TagsResult> {
     }
     throw err;
   }
+}
+
+const SEARCH_MAX_PAGES = 6; // 6 * 100 = up to 600 entries walked per live search
+
+/** Full-text search across the account's saved articles — titles and article
+ * bodies, across every status (unread/archived/starred), not just whatever
+ * filter the Entries tab currently has selected.
+ *
+ * Wallabag's REST API has no free-text search parameter (see the header comment
+ * in `./search.ts` for the confirmed server contract), so when online this walks
+ * `/api/entries` page by page (filter "all", `perPage=100`, up to
+ * `SEARCH_MAX_PAGES` pages) and matches each page's entries client-side via
+ * `matchesQuery`. Every page touched is written through to the local cache
+ * (`upsertEntries`) exactly like `listEntries` does, so later offline searches
+ * can still find it. If the server can't be reached at all, falls back to
+ * `searchCachedEntries`. If it's reached for at least one page but a later page
+ * fails mid-walk (e.g. the connection drops), the matches found so far are
+ * returned rather than discarded — a partial live result is more useful than an
+ * error for a search. */
+export async function searchEntries(client: WallabagClient, query: string): Promise<EntriesResult> {
+  const q = query.trim();
+  if (!q) return { items: [], fromCache: false };
+
+  const matches: WallabagEntry[] = [];
+  let page = 1;
+  let totalPages = 1;
+  let reachedServer = false;
+
+  while (page <= totalPages && page <= SEARCH_MAX_PAGES) {
+    let result;
+    try {
+      result = await client.fetchEntries({ filter: 'all', perPage: 100, page });
+    } catch {
+      break; // offline / server unreachable partway through — use what we have
+    }
+    reachedServer = true;
+    await upsertEntries(result.items);
+    for (const item of result.items) {
+      if (matchesQuery(item, q)) matches.push(item);
+    }
+    totalPages = result.pages || 1;
+    page += 1;
+  }
+
+  if (reachedServer) {
+    return { items: matches, fromCache: false };
+  }
+
+  const cached = await searchCachedEntries(q);
+  return { items: cached, fromCache: true };
 }
 
 /** Adds a tag (by free-text label, server creates it if new) to an entry and

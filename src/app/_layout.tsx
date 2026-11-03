@@ -26,6 +26,7 @@ export default function RootLayout() {
           options={{ presentation: 'card', headerShown: false }}
         />
         <Stack.Screen name="tags" options={{ presentation: 'card', headerShown: false }} />
+        <Stack.Screen name="search" options={{ presentation: 'card', headerShown: false }} />
       </Stack>
     </SafeAreaProvider>
   );

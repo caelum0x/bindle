@@ -105,6 +105,32 @@ export async function getCachedEntries(filter: EntryFilter, tag?: string): Promi
   );
 }
 
+/** Full-text search fallback over whatever is cached locally, used when a live
+ * search can't reach the server at all. Deliberately not capped at the 200-row
+ * recent window `getCachedEntries` uses — a search should be able to surface an
+ * older article too, not just recently-viewed ones — so this caps higher (300) and
+ * matches title/content/domain/url the same way the live-search path does, via a
+ * case-insensitive LIKE (searching raw stored content, since SQLite has no HTML
+ * stripping; acceptable for an offline fallback — the live path in
+ * `entriesRepository.searchEntries` does the stricter stripped-text match). */
+export async function searchCachedEntries(query: string): Promise<WallabagEntry[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const db = await getDb();
+  const needle = `%${trimmed}%`;
+  const rows = await db.getAllAsync<EntryRow>(
+    `SELECT * FROM entries
+     WHERE title LIKE ? COLLATE NOCASE
+        OR content LIKE ? COLLATE NOCASE
+        OR domain_name LIKE ? COLLATE NOCASE
+        OR url LIKE ? COLLATE NOCASE
+     ORDER BY created_at DESC
+     LIMIT 300`,
+    [needle, needle, needle, needle]
+  );
+  return rows.map(rowToEntry);
+}
+
 /** Derives the account's tag list from whatever entries are cached locally — the
  * offline fallback when a live GET /api/tags.json isn't reachable. Not a perfect
  * substitute (tags on entries that were never fetched won't appear) but real data,

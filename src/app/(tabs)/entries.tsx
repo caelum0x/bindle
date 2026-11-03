@@ -102,6 +102,14 @@ export default function Entries() {
             <Text style={[typography.tiny, { color: c.textFaint }]}>OFFLINE · SHOWING SAVED COPY</Text>
           ) : null}
           <Pressable
+            testID="entries-open-search"
+            onPress={() => router.push('/search')}
+            accessibilityLabel="Search your bindle"
+            hitSlop={8}
+          >
+            <Feather name="search" size={20} color={c.textMuted} />
+          </Pressable>
+          <Pressable
             testID="entries-open-tags"
             onPress={() => router.push('/tags')}
             accessibilityLabel="Browse tags"
