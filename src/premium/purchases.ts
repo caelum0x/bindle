@@ -43,10 +43,13 @@ export const PRODUCT_IDS: Record<PremiumPlan, string> = {
 };
 
 // Plan labels only. Prices are never written in code: the paywall shows the
-// store's own localized priceString or no plan at all.
+// store's own localized priceString or no plan at all. `badge` is a static
+// copy hint for the paywall's plan-row UI (e.g. highlighting the better-value
+// plan) — never a price or a discount percentage, which would have to come
+// from the store.
 const PLAN_LABELS: Record<PremiumPlan, PlanLabel> = {
   monthly: { title: 'Monthly', period: 'month' },
-  yearly: { title: 'Yearly', period: 'year' },
+  yearly: { title: 'Yearly', period: 'year', badge: 'Best value' },
 };
 
 /** Where the user manages or cancels the subscription (App Store review 3.1.2). */

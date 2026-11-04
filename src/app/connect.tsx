@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Linking,
   StyleSheet,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -61,6 +63,29 @@ export default function Connect() {
 
   const [checkingServer, setCheckingServer] = useState(false);
   const [connecting, setConnecting] = useState(false);
+
+  // Purposeful motion for the step hand-off: a short fade + settle-in each
+  // time `step` changes, so moving from "Your server" -> "API access" ->
+  // "Sign in" reads as one continuous flow advancing forward, not three
+  // screens being swapped instantly. Native-driver only, no extra dependency.
+  const stepAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    stepAnim.setValue(0);
+    const anim = Animated.timing(stepAnim, {
+      toValue: 1,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [step, stepAnim]);
+  const stepAnimatedStyle = {
+    opacity: stepAnim,
+    transform: [
+      { translateY: stepAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+    ],
+  };
 
   const goBack = () => {
     setServerUrlError(null);
@@ -163,7 +188,7 @@ export default function Connect() {
               onPress={goBack}
               accessibilityLabel="Back"
               hitSlop={12}
-              style={styles.backButton}
+              style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.5 : 1 }]}
             >
               <Feather name="chevron-left" size={24} color={c.text} />
             </Pressable>
@@ -184,57 +209,59 @@ export default function Connect() {
           <View style={styles.backButton} />
         </View>
 
-        {step === 0 ? (
-          <ServerStep
-            c={c}
-            serverUrl={serverUrl}
-            onChange={(v) => {
-              setServerUrl(v);
-              setServerUrlError(null);
-            }}
-            error={serverUrlError}
-            checking={checkingServer}
-            onContinue={onContinueServerUrl}
-          />
-        ) : null}
+        <Animated.View style={stepAnimatedStyle}>
+          {step === 0 ? (
+            <ServerStep
+              c={c}
+              serverUrl={serverUrl}
+              onChange={(v) => {
+                setServerUrl(v);
+                setServerUrlError(null);
+              }}
+              error={serverUrlError}
+              checking={checkingServer}
+              onContinue={onContinueServerUrl}
+            />
+          ) : null}
 
-        {step === 1 ? (
-          <CredentialsStep
-            c={c}
-            clientId={clientId}
-            clientSecret={clientSecret}
-            onChangeClientId={(v) => {
-              setClientId(v);
-              setCredentialsError(null);
-            }}
-            onChangeClientSecret={(v) => {
-              setClientSecret(v);
-              setCredentialsError(null);
-            }}
-            error={credentialsError}
-            onOpenDeveloperPage={openDeveloperPage}
-            onContinue={onContinueCredentials}
-          />
-        ) : null}
+          {step === 1 ? (
+            <CredentialsStep
+              c={c}
+              clientId={clientId}
+              clientSecret={clientSecret}
+              onChangeClientId={(v) => {
+                setClientId(v);
+                setCredentialsError(null);
+              }}
+              onChangeClientSecret={(v) => {
+                setClientSecret(v);
+                setCredentialsError(null);
+              }}
+              error={credentialsError}
+              onOpenDeveloperPage={openDeveloperPage}
+              onContinue={onContinueCredentials}
+            />
+          ) : null}
 
-        {step === 2 ? (
-          <SignInStep
-            c={c}
-            username={username}
-            password={password}
-            onChangeUsername={(v) => {
-              setUsername(v);
-              setSignInError(null);
-            }}
-            onChangePassword={(v) => {
-              setPassword(v);
-              setSignInError(null);
-            }}
-            error={signInError}
-            connecting={connecting}
-            onConnect={onConnect}
-          />
-        ) : null}
+          {step === 2 ? (
+            <SignInStep
+              c={c}
+              username={username}
+              password={password}
+              onChangeUsername={(v) => {
+                setUsername(v);
+                setSignInError(null);
+              }}
+              onChangePassword={(v) => {
+                setPassword(v);
+                setSignInError(null);
+              }}
+              error={signInError}
+              connecting={connecting}
+              onConnect={onConnect}
+            />
+          ) : null}
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -277,7 +304,10 @@ function CtaButton(props: { c: Colors; label: string; onPress: () => void; disab
       testID={testID}
       onPress={onPress}
       disabled={inactive}
-      style={[styles.cta, { backgroundColor: inactive ? c.surfaceAlt : c.accent, marginTop: spacing.xl }]}
+      style={({ pressed }) => [
+        styles.cta,
+        { backgroundColor: inactive ? c.surfaceAlt : c.accent, marginTop: spacing.xl, opacity: pressed && !inactive ? 0.85 : 1 },
+      ]}
     >
       {loading ? (
         <ActivityIndicator color={c.background} />
@@ -363,7 +393,10 @@ function CredentialsStep(props: {
         <Pressable
           testID="connect-open-developer-page"
           onPress={onOpenDeveloperPage}
-          style={[styles.secondaryButton, { borderColor: c.border, backgroundColor: c.surface }]}
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            { borderColor: c.border, backgroundColor: c.surface, opacity: pressed ? 0.6 : 1 },
+          ]}
         >
           <Feather name="external-link" size={14} color={c.text} />
           <Text style={[typography.caption, { color: c.text }]}>Open developer page</Text>

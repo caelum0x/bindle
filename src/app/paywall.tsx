@@ -12,6 +12,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Platform,
   Pressable,
   ScrollView,
@@ -62,6 +64,32 @@ const DISCLOSURE =
       'account at confirmation. It renews automatically unless cancelled at least 24 hours ' +
       'before the period ends. Manage or cancel anytime in your Google Play account settings.';
 
+/**
+ * A single, purposeful entrance for the paywall's content: a short fade +
+ * settle-up as the native modal sheet finishes its own slide-up transition,
+ * so the value moment (icon → title → benefits) reads as one deliberate
+ * reveal rather than content just appearing mid-animation. Native driver
+ * only (opacity/translateY), no extra dependency — `Animated` ships with
+ * React Native itself.
+ */
+function useEnterAnimation(): { opacity: Animated.Value; transform: { translateY: Animated.AnimatedInterpolation<number> }[] } {
+  const progress = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const anim = Animated.timing(progress, {
+      toValue: 1,
+      duration: 360,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [progress]);
+  return {
+    opacity: progress,
+    transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
+  };
+}
+
 export default function PaywallScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { c } = useTheme();
@@ -70,6 +98,7 @@ export default function PaywallScreen(): React.JSX.Element {
   const [selected, setSelected] = useState<PremiumPlan | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
+  const enter = useEnterAnimation();
 
   useEffect(
     () => () => {
@@ -140,24 +169,29 @@ export default function PaywallScreen(): React.JSX.Element {
   if (isPremium) {
     return (
       <View style={[styles.container, styles.center, { backgroundColor: c.background, paddingTop: insets.top }]}>
-        <View style={[styles.iconWrap, { backgroundColor: c.surfaceAlt }]}>
-          <Feather name="check" size={32} color={c.text} />
-        </View>
-        <Text style={[typography.title, { color: c.text, marginTop: spacing.lg, textAlign: 'center' }]}>
-          Premium is on
-        </Text>
-        <Text style={[typography.body, { color: c.textMuted, marginTop: spacing.xs, textAlign: 'center' }]}>
-          Unlimited bulk import and every export format are unlocked.
-        </Text>
-        <Pressable
-          testID="paywall-close"
-          onPress={() => router.back()}
-          accessibilityLabel="Close"
-          accessibilityRole="button"
-          style={[styles.closeCircle, { borderColor: c.border, marginTop: spacing.xl }]}
-        >
-          <Feather name="x" size={22} color={c.text} />
-        </Pressable>
+        <Animated.View style={{ alignItems: 'center', opacity: enter.opacity, transform: enter.transform }}>
+          <View style={[styles.iconWrap, { backgroundColor: c.surfaceAlt }]}>
+            <Feather name="check" size={32} color={c.text} />
+          </View>
+          <Text style={[typography.title, { color: c.text, marginTop: spacing.lg, textAlign: 'center' }]}>
+            Premium is on
+          </Text>
+          <Text style={[typography.body, { color: c.textMuted, marginTop: spacing.xs, textAlign: 'center' }]}>
+            Unlimited bulk import and every export format are unlocked.
+          </Text>
+          <Pressable
+            testID="paywall-close"
+            onPress={() => router.back()}
+            accessibilityLabel="Close"
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.closeCircle,
+              { borderColor: c.border, marginTop: spacing.xl, opacity: pressed ? 0.6 : 1 },
+            ]}
+          >
+            <Feather name="x" size={22} color={c.text} />
+          </Pressable>
+        </Animated.View>
       </View>
     );
   }
@@ -179,79 +213,112 @@ export default function PaywallScreen(): React.JSX.Element {
             accessibilityLabel="Close"
             accessibilityRole="button"
             hitSlop={12}
+            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
           >
             <Feather name="x" size={22} color={c.textMuted} />
           </Pressable>
         </View>
 
-        <View style={[styles.iconWrap, { backgroundColor: c.surfaceAlt, alignSelf: 'center', marginTop: spacing.sm }]}>
-          <Feather name="zap" size={32} color={c.text} />
-        </View>
-        <Text style={[typography.title, { color: c.text, marginTop: spacing.lg, textAlign: 'center' }]}>
-          Bindle Premium
-        </Text>
-        <Text style={[typography.body, { color: c.textMuted, marginTop: spacing.xs, textAlign: 'center' }]}>
-          Your bindle is connected. Premium removes the limits free accounts keep.
-        </Text>
+        <Animated.View style={{ opacity: enter.opacity, transform: enter.transform }}>
+          <View style={[styles.iconWrap, { backgroundColor: c.surfaceAlt, alignSelf: 'center', marginTop: spacing.sm }]}>
+            <Feather name="zap" size={32} color={c.text} />
+          </View>
+          <Text style={[typography.title, { color: c.text, marginTop: spacing.lg, textAlign: 'center' }]}>
+            Bindle Premium
+          </Text>
+          <Text style={[typography.body, { color: c.textMuted, marginTop: spacing.xs, textAlign: 'center' }]}>
+            Your bindle is connected. Premium removes the limits free accounts keep.
+          </Text>
 
-        <View style={{ marginTop: spacing.xl, gap: spacing.md }}>
-          {BENEFITS.map((b) => (
-            <View key={b.text} style={styles.benefitRow}>
-              <View style={[styles.benefitIcon, { backgroundColor: c.surfaceAlt }]}>
-                <Feather name={b.icon} size={16} color={c.text} />
+          <View style={{ marginTop: spacing.xl, gap: spacing.md }}>
+            {BENEFITS.map((b) => (
+              <View key={b.text} style={styles.benefitRow}>
+                <View style={[styles.benefitIcon, { backgroundColor: c.surfaceAlt }]}>
+                  <Feather name={b.icon} size={16} color={c.text} />
+                </View>
+                <Text style={[typography.body, { color: c.text, flex: 1 }]}>{b.text}</Text>
               </View>
-              <Text style={[typography.body, { color: c.text, flex: 1 }]}>{b.text}</Text>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
 
-        {plans === null ? (
-          <ActivityIndicator color={c.text} style={{ marginTop: spacing.xl }} />
-        ) : plans.length === 0 ? (
-          <View style={[styles.unavailable, { backgroundColor: c.surfaceAlt, borderColor: c.border }]}>
-            <Text style={[typography.caption, { color: c.textMuted, textAlign: 'center', lineHeight: 18 }]}>
-              Premium plans are temporarily unavailable. Check your connection and try again.
-            </Text>
-            <Pressable testID="paywall-retry" onPress={load} accessibilityRole="button" style={{ marginTop: spacing.sm }}>
-              <Text style={[typography.caption, { color: c.text, fontWeight: '700', textAlign: 'center' }]}>
-                Try again
+          {plans === null ? (
+            <ActivityIndicator color={c.text} style={{ marginTop: spacing.xl }} />
+          ) : plans.length === 0 ? (
+            <View style={[styles.unavailable, { backgroundColor: c.surfaceAlt, borderColor: c.border }]}>
+              <View style={[styles.unavailableIcon, { backgroundColor: c.surface, borderColor: c.border }]}>
+                <Feather name="cloud-off" size={18} color={c.textMuted} />
+              </View>
+              <Text style={[typography.caption, { color: c.textMuted, textAlign: 'center', lineHeight: 18, marginTop: spacing.sm }]}>
+                Premium plans are temporarily unavailable. Check your connection and try again.
               </Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={{ marginTop: spacing.xl, gap: spacing.sm }} accessibilityRole="radiogroup">
-            {plans.map((p) => {
-              const active = selected === p.plan;
-              return (
-                <Pressable
-                  key={p.plan}
-                  testID={`paywall-plan-${p.plan}`}
-                  onPress={() => setSelected(p.plan)}
-                  style={[styles.plan, { borderColor: active ? c.text : c.border, backgroundColor: c.surface }]}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: active }}
-                  accessibilityLabel={`${p.title}, ${p.price} per ${p.period}`}
-                >
-                  <View style={[styles.planTick, { backgroundColor: active ? c.text : c.border }]} />
-                  <Text style={[typography.heading, { color: c.text, flex: 1 }]}>{p.title}</Text>
-                  <Text style={[typography.heading, { color: c.text }]}>
-                    {p.price}
-                    <Text style={[typography.caption, { color: c.textMuted }]}> / {p.period}</Text>
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
+              <Pressable
+                testID="paywall-retry"
+                onPress={load}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.retryButton,
+                  { borderColor: c.border, backgroundColor: c.surface, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Feather name="refresh-cw" size={13} color={c.text} />
+                <Text style={[typography.caption, { color: c.text, fontWeight: '700' }]}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={{ marginTop: spacing.xl, gap: spacing.sm }} accessibilityRole="radiogroup">
+              {plans.map((p) => {
+                const active = selected === p.plan;
+                return (
+                  <Pressable
+                    key={p.plan}
+                    testID={`paywall-plan-${p.plan}`}
+                    onPress={() => setSelected(p.plan)}
+                    style={({ pressed }) => [
+                      styles.plan,
+                      {
+                        borderColor: active ? c.text : c.border,
+                        backgroundColor: active ? c.surfaceAlt : c.surface,
+                        opacity: pressed ? 0.85 : 1,
+                      },
+                    ]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: active }}
+                    accessibilityLabel={`${p.title}, ${p.price} per ${p.period}${p.badge ? `, ${p.badge}` : ''}`}
+                  >
+                    <View style={[styles.planTick, { backgroundColor: active ? c.text : c.border }]} />
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+                        <Text style={[typography.body, { color: c.text, fontWeight: '600' }]}>{p.title}</Text>
+                        {p.badge ? (
+                          <View style={[styles.planBadge, { backgroundColor: c.text }]}>
+                            <Text style={[typography.tiny, { color: c.background }]}>{p.badge.toUpperCase()}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    </View>
+                    <Text style={[styles.planPrice, { color: c.text }]}>
+                      {p.price}
+                      <Text style={[typography.caption, { color: c.textMuted }]}> / {p.period}</Text>
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </Animated.View>
 
         <Pressable
           testID="paywall-subscribe"
           onPress={() => void buy()}
           disabled={busy || !selected || !plans?.length}
           accessibilityRole="button"
-          style={[
+          style={({ pressed }) => [
             styles.cta,
-            { backgroundColor: busy || !selected || !plans?.length ? c.surfaceAlt : c.accent, marginTop: spacing.xl },
+            {
+              backgroundColor: busy || !selected || !plans?.length ? c.surfaceAlt : c.accent,
+              marginTop: spacing.xl,
+              opacity: pressed && !(busy || !selected || !plans?.length) ? 0.85 : 1,
+            },
           ]}
         >
           {busy ? (
@@ -268,7 +335,7 @@ export default function PaywallScreen(): React.JSX.Element {
           onPress={() => void restore()}
           disabled={busy}
           accessibilityRole="button"
-          style={{ marginTop: spacing.md }}
+          style={({ pressed }) => ({ marginTop: spacing.md, opacity: pressed ? 0.6 : 1 })}
         >
           <Text style={[typography.body, { color: c.text, fontWeight: '600', textAlign: 'center' }]}>
             Restore purchases
@@ -298,7 +365,31 @@ const styles = StyleSheet.create({
   },
   benefitRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   benefitIcon: { width: 32, height: 32, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
-  unavailable: { marginTop: spacing.xl, padding: spacing.md, borderRadius: radius.md, borderWidth: 1 },
+  unavailable: {
+    marginTop: spacing.xl,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  unavailableIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.md,
+  },
   plan: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -308,6 +399,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
   },
-  planTick: { width: 4, height: 24, borderRadius: radius.pill },
+  planTick: { width: 4, height: 28, borderRadius: radius.pill },
+  planBadge: { borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2 },
+  planPrice: { fontSize: 20, fontWeight: '700' },
   cta: { paddingVertical: 16, borderRadius: radius.md, alignItems: 'center' },
 });
