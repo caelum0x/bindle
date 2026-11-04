@@ -1,0 +1,21 @@
+diff --git a/node_modules/expo-modules-core/ios/Core/SharedObjects/SharedObjectRegistry.swift b/node_modules/expo-modules-core/ios/Core/SharedObjects/SharedObjectRegistry.swift
+index 3683418..7025a6d 100644
+--- a/node_modules/expo-modules-core/ios/Core/SharedObjects/SharedObjectRegistry.swift
++++ b/node_modules/expo-modules-core/ios/Core/SharedObjects/SharedObjectRegistry.swift
+@@ -19,7 +19,15 @@ public final class SharedObjectRegistry: Sendable {
+   /**
+    Weak reference to the app context for the registry.
+    */
+-  private weak let appContext: AppContext?
++  // NOTE(bindle 2026-11-04): upstream has this as `private weak let appContext: AppContext?`.
++  // `weak let` is only valid Swift syntax as of SE-0481 (Swift 6.3 / Xcode 26.4+); on older
++  // toolchains (this machine: Xcode 26.0.1 / Swift 6.2) it's a hard compile error ("'weak' must
++  // be a mutable variable"). Expo's own team hit and fixed the identical pattern in the sibling
++  // expo-modules-jsi package (github.com/expo/expo PR #47157, `weak let` -> `nonisolated(unsafe)
++  // weak var`) but never applied the same fix to this file in expo-modules-core (confirmed still
++  // present verbatim through the latest published 58.0.30). Patched here via patch-package,
++  // mirroring Expo's own merged fix for the exact same bug in the exact same codebase.
++  private nonisolated(unsafe) weak var appContext: AppContext?
+ 
+   // `@unchecked` because `SharedObjectNativeState` isn't `Sendable` (its JSI base class isn't), yet a
+   // value escapes `withLock` whenever `get`/the lookups return it. Access is always serialized through
