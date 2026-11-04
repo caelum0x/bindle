@@ -26,8 +26,36 @@ export type TokenPersistence = {
   write: (tokens: StoredTokens) => Promise<void>;
 };
 
-function normalizeServerUrl(url: string): string {
+export function normalizeServerUrl(url: string): string {
   return url.trim().replace(/\/+$/, '');
+}
+
+export type ServerReachability = 'reachable' | 'unreachable';
+
+/**
+ * Lightweight, unauthenticated check that a Wallabag server actually answers at
+ * this address — used by the connect flow to fail fast on a bad URL *before*
+ * asking the user to fill in four more fields. Hits `/api/info.json` (Wallabag's
+ * public server-info route, https://doc.wallabag.org): a real Wallabag install
+ * answers even with no credentials (401 "unauthorized" is a perfectly good
+ * signal that something is there), so any HTTP response at all counts as
+ * reachable — only a network failure (bad host, no TLS, timeout) counts as not.
+ */
+export async function checkServerReachable(
+  serverUrl: string,
+  timeoutMs = 8000
+): Promise<ServerReachability> {
+  const url = normalizeServerUrl(serverUrl);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(`${url}/api/info.json`, { signal: controller.signal });
+    return 'reachable';
+  } catch {
+    return 'unreachable';
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**
