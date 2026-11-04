@@ -13,12 +13,14 @@ import {
   cancelUnreadReminder,
 } from '../../lib/notifications/reminders';
 import { clearCache } from '../../lib/db/database';
+import { usePremium } from '../../premium/premium-context';
 
 export default function Settings() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const serverLabel = useAuthStore((s) => s.serverLabel);
   const signOut = useAuthStore((s) => s.signOut);
+  const { isPremium } = usePremium();
 
   const [reminderOn, setReminderOn] = useState(false);
 
@@ -48,6 +50,22 @@ export default function Settings() {
       <Text style={[typography.title, { color: c.text, paddingHorizontal: spacing.lg, marginTop: spacing.md }]}>
         Settings
       </Text>
+
+      <Section title="Premium">
+        <Pressable
+          testID="settings-open-paywall"
+          onPress={() => router.push('/paywall?source=settings')}
+          style={[styles.row, { borderColor: c.border }]}
+        >
+          <View style={styles.rowLeft}>
+            <Feather name="zap" size={18} color={c.textMuted} />
+            <Text style={[typography.body, { color: c.text }]}>
+              {isPremium ? 'Bindle Premium — active' : 'Go Premium'}
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={c.textFaint} />
+        </Pressable>
+      </Section>
 
       <Section title="Server">
         <Row icon="server" label={serverLabel ?? 'Not connected'} c={c} />

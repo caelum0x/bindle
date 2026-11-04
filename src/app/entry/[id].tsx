@@ -35,6 +35,8 @@ import {
 import { buildHighlightScript } from '../../lib/annotations/highlightScript';
 import type { EntryExportFormat, WallabagAnnotation, WallabagEntry } from '../../lib/api/types';
 import { getErrorMessage } from '../../lib/errors';
+import { usePremium } from '../../premium/premium-context';
+import { isExportFormatPremium } from '../../premium/limits';
 
 type HighlightMessage =
   | { type: 'createHighlight'; quote: string; ranges: WallabagAnnotation['ranges'] }
@@ -91,6 +93,7 @@ export default function EntryDetail() {
   const { c, dark } = useTheme();
   const insets = useSafeAreaInsets();
   const client = useAuthStore((s) => s.client);
+  const { isPremium } = usePremium();
 
   const [entry, setEntry] = useState<WallabagEntry | null>(null);
   const [offline, setOffline] = useState(false);
@@ -221,10 +224,18 @@ export default function EntryDetail() {
     if (!entry) return;
     Alert.alert('Export article', 'Choose a format', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'EPUB', onPress: () => runExport('epub') },
-      { text: 'PDF', onPress: () => runExport('pdf') },
-      { text: 'Plain text', onPress: () => runExport('txt') },
+      { text: isPremium ? 'EPUB' : 'EPUB (Premium)', onPress: () => onExportFormat('epub') },
+      { text: isPremium ? 'PDF' : 'PDF (Premium)', onPress: () => onExportFormat('pdf') },
+      { text: 'Plain text', onPress: () => onExportFormat('txt') },
     ]);
+  };
+
+  const onExportFormat = (format: EntryExportFormat) => {
+    if (!isPremium && isExportFormatPremium(format)) {
+      router.push('/paywall?source=export');
+      return;
+    }
+    void runExport(format);
   };
 
   const runExport = async (format: EntryExportFormat) => {

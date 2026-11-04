@@ -13,12 +13,20 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../lib/auth/authStore';
 import { useTheme } from '../lib/useTheme';
 import { radius, spacing, typography } from '../lib/theme';
 import { getErrorMessage } from '../lib/errors';
 import { checkServerReachable, normalizeServerUrl } from '../lib/api/wallabagClient';
+import { usePremium } from '../premium/premium-context';
+
+/** Set once the paywall has been shown after a first successful connect, so
+ * reconnecting later (e.g. after Settings > Disconnect) doesn't re-show it
+ * every time — the packaging rule is "show it to every free account right
+ * after the value moment", not "nag on every sign-in". */
+const PAYWALL_SHOWN_KEY = 'bindle.paywall.shown.v1';
 
 type StepIndex = 0 | 1 | 2;
 const STEP_COUNT = 3;
@@ -37,6 +45,7 @@ export default function Connect() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const connect = useAuthStore((s) => s.connect);
+  const { isPremium } = usePremium();
 
   const [step, setStep] = useState<StepIndex>(0);
 
@@ -110,6 +119,18 @@ export default function Connect() {
         password,
       });
       router.replace('/(tabs)/entries');
+
+      // The value moment: the user just watched their own saved articles
+      // connect. Premium's whole pitch (unlimited bulk import, richer export
+      // formats) is maximally relevant right here, so it is shown to every
+      // free account once, not only when one bumps into a specific limit.
+      // Pushed on top of the entries list (not a replace) so dismissing it
+      // either way lands on a fully working app.
+      const alreadyShown = await SecureStore.getItemAsync(PAYWALL_SHOWN_KEY);
+      if (!alreadyShown) {
+        await SecureStore.setItemAsync(PAYWALL_SHOWN_KEY, '1');
+        if (!isPremium) router.push('/paywall?source=connect');
+      }
     } catch (err: unknown) {
       setSignInError(getErrorMessage(err, 'Could not connect. Check your details and try again.'));
     } finally {

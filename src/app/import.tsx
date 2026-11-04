@@ -5,6 +5,7 @@ import {
   TextInput,
   Pressable,
   ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   KeyboardAvoidingView,
@@ -21,6 +22,8 @@ import { bulkSaveLinks } from '../lib/entriesRepository';
 import { looksLikeUrl } from '../lib/url';
 import { getErrorMessage } from '../lib/errors';
 import type { BulkSaveResult } from '../lib/api/types';
+import { usePremium } from '../premium/premium-context';
+import { FREE_MAX_BULK_IMPORT, clampBulkImport } from '../premium/limits';
 
 /** Batch save: paste any number of links, one per line, and send them to the
  * server in a single real `POST /api/entries/lists` call — not one save per
@@ -29,6 +32,7 @@ export default function Import() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const client = useAuthStore((s) => s.client);
+  const { isPremium } = usePremium();
 
   const [text, setText] = useState('');
   const [importing, setImporting] = useState(false);
@@ -40,15 +44,27 @@ export default function Import() {
     .map((line) => line.trim())
     .filter((line) => looksLikeUrl(line));
 
+  const { allowed: importable, overflow } = clampBulkImport(urls, isPremium);
+
   const onImport = async () => {
-    if (!client || urls.length === 0) return;
+    if (!client || importable.length === 0) return;
     setImporting(true);
     setError(null);
     setResults(null);
     try {
-      const saved = await bulkSaveLinks(client, urls);
+      const saved = await bulkSaveLinks(client, importable);
       setResults(saved);
       setText('');
+      if (overflow > 0) {
+        Alert.alert(
+          'Free limit reached',
+          `Imported the first ${FREE_MAX_BULK_IMPORT} links. ${overflow} more need Premium for unlimited bulk import.`,
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Go Premium', onPress: () => router.push('/paywall?source=import') },
+          ]
+        );
+      }
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Could not import those links.'));
     } finally {
@@ -96,6 +112,13 @@ export default function Import() {
           <Text style={[typography.caption, { color: c.textFaint, marginTop: spacing.xs }]}>
             {urls.length} valid link{urls.length === 1 ? '' : 's'} detected
           </Text>
+          {overflow > 0 ? (
+            <Pressable onPress={() => router.push('/paywall?source=import')} hitSlop={4}>
+              <Text style={[typography.caption, { color: c.text, marginTop: spacing.xs }]}>
+                Free imports {FREE_MAX_BULK_IMPORT} at a time — Go Premium for all {urls.length}.
+              </Text>
+            </Pressable>
+          ) : null}
 
           {error ? (
             <Text style={[typography.caption, { color: c.danger, marginTop: spacing.sm }]}>{error}</Text>
@@ -104,17 +127,17 @@ export default function Import() {
           <Pressable
             testID="import-submit"
             onPress={onImport}
-            disabled={urls.length === 0 || importing}
+            disabled={importable.length === 0 || importing}
             style={[
               styles.cta,
-              { backgroundColor: urls.length > 0 && !importing ? c.accent : c.surfaceAlt, marginTop: spacing.lg },
+              { backgroundColor: importable.length > 0 && !importing ? c.accent : c.surfaceAlt, marginTop: spacing.lg },
             ]}
           >
             {importing ? (
               <ActivityIndicator color={c.background} />
             ) : (
-              <Text style={[typography.heading, { color: urls.length > 0 ? c.background : c.textFaint }]}>
-                Import {urls.length > 0 ? urls.length : ''} link{urls.length === 1 ? '' : 's'}
+              <Text style={[typography.heading, { color: importable.length > 0 ? c.background : c.textFaint }]}>
+                Import {importable.length > 0 ? importable.length : ''} link{importable.length === 1 ? '' : 's'}
               </Text>
             )}
           </Pressable>
