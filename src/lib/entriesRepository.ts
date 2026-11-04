@@ -16,6 +16,7 @@ import {
   clearPendingAction,
 } from './db/database';
 import { matchesQuery } from './search';
+import { drainPendingShareSaves } from './sync/pendingShareSaves';
 
 export type EntriesResult = {
   items: WallabagEntry[];
@@ -27,6 +28,19 @@ export type TagsResult = {
   fromCache: boolean;
 };
 
+/** Merges whatever the iOS Share Extension has queued since the last drain
+ * (see `sync/pendingShareSaves.ts` for the full root-cause writeup) into the
+ * real offline cache, so an entry saved from the share sheet shows up in the
+ * cache even if the main app never gets a chance to re-fetch it live before
+ * going offline. A plain no-op when nothing is queued — safe to call on
+ * every list load and every app foreground. */
+export async function syncPendingShareSaves(): Promise<number> {
+  const pending = await drainPendingShareSaves();
+  if (pending.length === 0) return 0;
+  await upsertEntries(pending);
+  return pending.length;
+}
+
 /** List entries, preferring live data but always falling back to the local SQLite
  * cache when the network/server is unreachable — the core "works offline" promise.
  * `tag` (a tag label or slug) narrows the list to entries carrying that tag, same as
@@ -36,6 +50,7 @@ export async function listEntries(
   filter: EntryFilter,
   tag?: string
 ): Promise<EntriesResult> {
+  await syncPendingShareSaves().catch(() => {});
   try {
     const page = await client.fetchEntries({ filter, perPage: 50, tag });
     await upsertEntries(page.items);

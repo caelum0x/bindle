@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, View, Text, Pressable, FlatList, RefreshControl, StyleSheet } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -73,6 +73,24 @@ export default function Entries() {
       load();
     }, [load])
   );
+
+  // Real app-foreground trigger (not just navigation focus): catches the
+  // case where the user backgrounds Bindle while already sitting on this
+  // tab — e.g. to share a link into the extension from Safari — and comes
+  // straight back without ever re-triggering `useFocusEffect` above. Reloads
+  // silently so a link saved via the share extension (see
+  // `sync/pendingShareSaves.ts`) is drained into the real offline cache and
+  // reflected here without the user having to pull-to-refresh.
+  const appStateRef = useRef(AppState.currentState);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (appStateRef.current !== 'active' && nextState === 'active') {
+        load({ silent: true });
+      }
+      appStateRef.current = nextState;
+    });
+    return () => subscription.remove();
+  }, [load]);
 
   const onRefresh = () => {
     setRefreshing(true);

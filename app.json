@@ -50,6 +50,7 @@
       ],
       "expo-font",
       "./plugins/withShareExtensionKeychainAccessGroup",
+      "./plugins/withShareExtensionDeploymentTarget",
       [
         "expo-share-extension",
         {

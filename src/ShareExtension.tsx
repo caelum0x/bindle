@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Text, close, type InitialProps } from 'expo-share-extension';
 import { saveLink } from './lib/entriesRepository';
 import { loadStoredClient } from './lib/auth/sharedAuth';
+import { appendPendingShareSave } from './lib/sync/pendingShareSaves';
 import { extractFirstUrl } from './lib/url';
 import { getErrorMessage } from './lib/errors';
 import type { WallabagEntry } from './lib/api/types';
@@ -48,6 +49,15 @@ export default function ShareExtension({ url, text }: InitialProps) {
       try {
         const entry = await saveLink(stored.client, target);
         if (cancelled) return;
+        try {
+          // Hands this save off to the main app's real cache across the
+          // sandbox boundary (see sync/pendingShareSaves.ts). The server save
+          // above already succeeded, so a failure here must not be surfaced
+          // as a save failure.
+          await appendPendingShareSave(entry);
+        } catch {
+          // Best-effort — same contract as saveLink's own local-cache write.
+        }
         setSavedEntry(entry);
         setStage('saved');
         setTimeout(() => {
