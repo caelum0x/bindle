@@ -1,11 +1,14 @@
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import type { WallabagClient } from './api/wallabagClient';
-import type { EntryFilter, WallabagEntry, WallabagTag } from './api/types';
+import type { BulkSaveResult, EntryExportFormat, EntryFilter, WallabagEntry, WallabagTag } from './api/types';
 import {
   getCachedEntries,
   getCachedEntry,
   getCachedTags,
   queuePendingAction,
   removeCachedEntry,
+  removeCachedTag,
   searchCachedEntries,
   updateCachedFlags,
   upsertEntries,
@@ -61,26 +64,41 @@ export async function listTags(client: WallabagClient): Promise<TagsResult> {
   }
 }
 
-const SEARCH_MAX_PAGES = 6; // 6 * 100 = up to 600 entries walked per live search
+const SEARCH_MAX_PAGES = 6; // 6 * 100 = up to 600 entries walked per live search fallback
 
 /** Full-text search across the account's saved articles — titles and article
  * bodies, across every status (unread/archived/starred), not just whatever
  * filter the Entries tab currently has selected.
  *
- * Wallabag's REST API has no free-text search parameter (see the header comment
- * in `./search.ts` for the confirmed server contract), so when online this walks
- * `/api/entries` page by page (filter "all", `perPage=100`, up to
- * `SEARCH_MAX_PAGES` pages) and matches each page's entries client-side via
- * `matchesQuery`. Every page touched is written through to the local cache
- * (`upsertEntries`) exactly like `listEntries` does, so later offline searches
- * can still find it. If the server can't be reached at all, falls back to
- * `searchCachedEntries`. If it's reached for at least one page but a later page
- * fails mid-walk (e.g. the connection drops), the matches found so far are
- * returned rather than discarded — a partial live result is more useful than an
- * error for a search. */
+ * Tries the server's real search endpoint first (`GET /api/search` —
+ * `SearchRestController::getSearchAction`, confirmed against current upstream
+ * source; matches title/content/url/annotations server-side). Every page
+ * touched is written through to the local cache (`upsertEntries`) exactly like
+ * `listEntries` does. If that endpoint itself fails (older server without it,
+ * a transient 5xx, etc.) this falls back to the previous client-side walk of
+ * `/api/entries` (filter "all", `perPage=100`, up to `SEARCH_MAX_PAGES` pages)
+ * matched via `matchesQuery`, so a working search never regresses just because
+ * one endpoint had a bad day. If nothing can be reached at all, falls back to
+ * `searchCachedEntries`. */
 export async function searchEntries(client: WallabagClient, query: string): Promise<EntriesResult> {
   const q = query.trim();
   if (!q) return { items: [], fromCache: false };
+
+  try {
+    const matches: WallabagEntry[] = [];
+    let page = 1;
+    let totalPages = 1;
+    while (page <= totalPages && page <= SEARCH_MAX_PAGES) {
+      const result = await client.searchEntriesServer(q, page, 100);
+      await upsertEntries(result.items);
+      matches.push(...result.items);
+      totalPages = result.pages || 1;
+      page += 1;
+    }
+    return { items: matches, fromCache: false };
+  } catch {
+    // Server search unavailable — fall through to the page-walk below.
+  }
 
   const matches: WallabagEntry[] = [];
   let page = 1;
@@ -225,4 +243,71 @@ export async function flushPendingActions(client: WallabagClient): Promise<numbe
     }
   }
   return replayed;
+}
+
+/** Re-fetches an entry's content from its original source URL (fixes a
+ * mis-parsed article without having to delete and re-save it). The server
+ * returns 304 with no body when nothing could be refreshed; the caller sees
+ * that as `refreshed: false` rather than a thrown error. */
+export async function reloadEntryContent(
+  client: WallabagClient,
+  id: number
+): Promise<{ entry: WallabagEntry | null; refreshed: boolean }> {
+  const entry = await client.reloadEntry(id);
+  if (entry) await upsertEntries([entry]);
+  return { entry, refreshed: entry !== null };
+}
+
+/** Checks whether a URL is already saved, so the Add screen can point the user
+ * at the existing copy instead of letting them create a duplicate. Online-only
+ * by design — an offline cache can't tell whether *today's* current server
+ * state has the URL, so a failure here should be treated as "unknown", not
+ * "not saved". */
+export async function checkUrlAlreadySaved(client: WallabagClient, url: string): Promise<boolean> {
+  return client.checkEntryExists(url);
+}
+
+function sanitizeFilename(title: string): string {
+  const trimmed = title.trim() || 'article';
+  return trimmed.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 80).trim() || 'article';
+}
+
+/** Exports one entry as a real file (epub/pdf/txt/csv/xml, rendered by the
+ * server, not a client-side conversion) and opens the native share sheet on
+ * it. Writes to the app's cache directory since this is a disposable, re-
+ * downloadable copy, not something Bindle needs to keep around. */
+export async function exportEntryToFile(
+  client: WallabagClient,
+  entry: WallabagEntry,
+  format: EntryExportFormat
+): Promise<void> {
+  const { bytes, contentType } = await client.exportEntry(entry.id, format);
+  const file = new File(Paths.cache, `${sanitizeFilename(entry.title)}.${format}`);
+  file.create({ overwrite: true });
+  await file.write(bytes);
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(file.uri, { dialogTitle: entry.title, mimeType: contentType });
+  }
+}
+
+/** Bulk-saves a newline-separated list of URLs in one request (the Import
+ * screen's paste-many-links flow) and writes through every real entry id the
+ * server hands back into the local cache, same as a normal single save. */
+export async function bulkSaveLinks(client: WallabagClient, urls: string[]): Promise<BulkSaveResult[]> {
+  const results = await client.bulkSaveLinks(urls);
+  const ids = results.map((r) => r.entry).filter((id): id is number => typeof id === 'number');
+  if (ids.length > 0) {
+    const fetched = await Promise.all(ids.map((id) => client.fetchEntry(id).catch(() => null)));
+    const entries = fetched.filter((e): e is WallabagEntry => e !== null);
+    if (entries.length > 0) await upsertEntries(entries);
+  }
+  return results;
+}
+
+/** Permanently deletes a tag account-wide (every entry carrying it loses it),
+ * then strips it from the local cache so the Tags screen and any cached
+ * entries' tag chips stay consistent without needing a full re-sync. */
+export async function deleteTagGlobally(client: WallabagClient, tag: WallabagTag): Promise<void> {
+  await client.deleteTagGlobally(tag.id);
+  await removeCachedTag(tag.id);
 }

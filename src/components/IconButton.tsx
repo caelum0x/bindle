@@ -9,6 +9,7 @@ type Props = {
   size?: number;
   active?: boolean;
   danger?: boolean;
+  disabled?: boolean;
   accessibilityLabel: string;
   testID?: string;
 };
@@ -19,6 +20,7 @@ export function IconButton({
   size = 20,
   active,
   danger,
+  disabled,
   accessibilityLabel,
   testID,
 }: Props) {
@@ -27,11 +29,12 @@ export function IconButton({
     <Pressable
       testID={testID}
       onPress={onPress}
+      disabled={disabled}
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
       style={({ pressed }) => [
         styles.hit,
-        { backgroundColor: pressed ? c.overlay : 'transparent', borderRadius: radius.pill },
+        { backgroundColor: pressed ? c.overlay : 'transparent', borderRadius: radius.pill, opacity: disabled ? 0.4 : 1 },
       ]}
     >
       <Feather

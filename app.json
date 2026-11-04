@@ -11,8 +11,12 @@
       "supportsTablet": true,
       "bundleIdentifier": "app.bindle.mobile",
       "entitlements": {
-        "com.apple.security.application-groups": ["group.app.bindle.mobile"],
-        "keychain-access-groups": ["group.app.bindle.mobile"]
+        "com.apple.security.application-groups": [
+          "group.app.bindle.mobile"
+        ],
+        "keychain-access-groups": [
+          "group.app.bindle.mobile"
+        ]
       }
     },
     "android": {
@@ -50,8 +54,13 @@
         "expo-share-extension",
         {
           "activationRules": [
-            { "type": "url", "max": 1 },
-            { "type": "text" }
+            {
+              "type": "url",
+              "max": 1
+            },
+            {
+              "type": "text"
+            }
           ],
           "excludedPackages": [
             "expo-notifications",
@@ -60,7 +69,8 @@
             "react-native-screens"
           ]
         }
-      ]
+      ],
+      "expo-sharing"
     ]
   }
 }

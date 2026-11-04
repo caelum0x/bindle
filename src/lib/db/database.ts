@@ -159,6 +159,27 @@ export async function removeCachedEntry(id: number): Promise<void> {
   await db.runAsync('DELETE FROM entries WHERE id = ?', [id]);
 }
 
+/** Strips one tag (by id) out of every cached entry's `tags_json` after it's
+ * been deleted account-wide server-side — keeps the offline tag-derivation in
+ * `getCachedTags`/`getCachedEntries` from still showing a tag that no longer
+ * exists on the server. */
+export async function removeCachedTag(tagId: number): Promise<void> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ id: number; tags_json: string }>(
+    'SELECT id, tags_json FROM entries WHERE tags_json LIKE ?',
+    [`%"id":${tagId}%`]
+  );
+  await db.withTransactionAsync(async () => {
+    for (const row of rows) {
+      const tags: WallabagTag[] = JSON.parse(row.tags_json ?? '[]');
+      const next = tags.filter((t) => t.id !== tagId);
+      if (next.length !== tags.length) {
+        await db.runAsync('UPDATE entries SET tags_json = ? WHERE id = ?', [JSON.stringify(next), row.id]);
+      }
+    }
+  });
+}
+
 export async function updateCachedFlags(
   id: number,
   patch: Partial<{ is_archived: 0 | 1; is_starred: 0 | 1 }>

@@ -19,7 +19,9 @@ import { IconButton } from '../../components/IconButton';
 import { EmptyState } from '../../components/EmptyState';
 import {
   addTagToEntry,
+  exportEntryToFile,
   loadEntry,
+  reloadEntryContent,
   removeEntry,
   removeTagFromEntry,
   toggleArchive,
@@ -31,7 +33,7 @@ import {
   loadAnnotations,
 } from '../../lib/annotationsRepository';
 import { buildHighlightScript } from '../../lib/annotations/highlightScript';
-import type { WallabagAnnotation, WallabagEntry } from '../../lib/api/types';
+import type { EntryExportFormat, WallabagAnnotation, WallabagEntry } from '../../lib/api/types';
 import { getErrorMessage } from '../../lib/errors';
 
 type HighlightMessage =
@@ -98,6 +100,8 @@ export default function EntryDetail() {
   const [tagBusy, setTagBusy] = useState(false);
   const [tagError, setTagError] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<WallabagAnnotation[]>([]);
+  const [refreshingContent, setRefreshingContent] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const webViewRef = useRef<WebViewHandle>(null);
 
   useEffect(() => {
@@ -197,6 +201,44 @@ export default function EntryDetail() {
     ]);
   };
 
+  const onRefreshContent = async () => {
+    if (!client || !entry) return;
+    setRefreshingContent(true);
+    try {
+      const { entry: refreshed, refreshed: didRefresh } = await reloadEntryContent(client, entry.id);
+      if (refreshed) setEntry(refreshed);
+      if (!didRefresh) {
+        Alert.alert('Nothing to refresh', 'The server could not fetch a newer version of this article.');
+      }
+    } catch (err: unknown) {
+      Alert.alert('Could not refresh', getErrorMessage(err, 'Check your connection and try again.'));
+    } finally {
+      setRefreshingContent(false);
+    }
+  };
+
+  const onExport = () => {
+    if (!entry) return;
+    Alert.alert('Export article', 'Choose a format', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'EPUB', onPress: () => runExport('epub') },
+      { text: 'PDF', onPress: () => runExport('pdf') },
+      { text: 'Plain text', onPress: () => runExport('txt') },
+    ]);
+  };
+
+  const runExport = async (format: EntryExportFormat) => {
+    if (!client || !entry) return;
+    setExporting(true);
+    try {
+      await exportEntryToFile(client, entry, format);
+    } catch (err: unknown) {
+      Alert.alert('Could not export', getErrorMessage(err, 'Check your connection and try again.'));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const onAddTag = async () => {
     const label = newTag.trim();
     if (!client || !entry || !label) return;
@@ -242,6 +284,20 @@ export default function EntryDetail() {
           <View />
         )}
         <View style={{ flexDirection: 'row' }}>
+          <IconButton
+            testID="detail-refresh"
+            name="refresh-cw"
+            accessibilityLabel="Refresh article content"
+            onPress={onRefreshContent}
+            disabled={refreshingContent || !entry}
+          />
+          <IconButton
+            testID="detail-export"
+            name="share"
+            accessibilityLabel="Export article"
+            onPress={onExport}
+            disabled={exporting || !entry}
+          />
           <IconButton
             testID="detail-star"
             name="star"

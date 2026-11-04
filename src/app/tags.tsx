@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, FlatList, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, FlatList, Pressable, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,7 +8,7 @@ import { useTheme } from '../lib/useTheme';
 import { radius, spacing, typography } from '../lib/theme';
 import { IconButton } from '../components/IconButton';
 import { EmptyState } from '../components/EmptyState';
-import { listTags } from '../lib/entriesRepository';
+import { deleteTagGlobally, listTags } from '../lib/entriesRepository';
 import type { WallabagTag } from '../lib/api/types';
 import { getErrorMessage } from '../lib/errors';
 
@@ -42,6 +42,29 @@ export default function Tags() {
       pathname: '/(tabs)/entries',
       params: { tag: tagItem.slug || tagItem.label, tagLabel: tagItem.label },
     });
+  };
+
+  const onDeleteTag = (tagItem: WallabagTag) => {
+    if (!client) return;
+    Alert.alert(
+      'Delete tag',
+      `Remove "${tagItem.label}" from every saved article? This can't be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteTagGlobally(client, tagItem);
+              setTags((prev) => prev.filter((t) => t.id !== tagItem.id));
+            } catch (err: unknown) {
+              Alert.alert('Could not delete tag', getErrorMessage(err, 'Check your connection and try again.'));
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -80,20 +103,28 @@ export default function Tags() {
           keyExtractor={(t) => String(t.id)}
           contentContainerStyle={{ paddingHorizontal: spacing.md, paddingTop: spacing.md, gap: spacing.sm }}
           renderItem={({ item }) => (
-            <Pressable
-              testID={`tag-row-${item.id}`}
-              onPress={() => openTag(item)}
-              style={({ pressed }) => [
-                styles.row,
-                { backgroundColor: c.surface, borderColor: c.border, opacity: pressed ? 0.85 : 1 },
-              ]}
-            >
-              <Feather name="tag" size={16} color={c.textMuted} />
-              <Text style={[typography.body, { color: c.text, flex: 1 }]} numberOfLines={1}>
-                {item.label}
-              </Text>
-              <Feather name="chevron-right" size={16} color={c.textFaint} />
-            </Pressable>
+            <View style={[styles.row, { backgroundColor: c.surface, borderColor: c.border }]}>
+              <Pressable
+                testID={`tag-row-${item.id}`}
+                onPress={() => openTag(item)}
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}
+              >
+                <Feather name="tag" size={16} color={c.textMuted} />
+                <Text style={[typography.body, { color: c.text, flex: 1 }]} numberOfLines={1}>
+                  {item.label}
+                </Text>
+                <Feather name="chevron-right" size={16} color={c.textFaint} />
+              </Pressable>
+              <Pressable
+                testID={`tag-delete-${item.id}`}
+                onPress={() => onDeleteTag(item)}
+                accessibilityLabel={`Delete tag ${item.label}`}
+                hitSlop={8}
+                style={{ paddingLeft: spacing.sm }}
+              >
+                <Feather name="trash-2" size={16} color={c.danger} />
+              </Pressable>
+            </View>
           )}
         />
       )}

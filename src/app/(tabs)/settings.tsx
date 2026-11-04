@@ -51,6 +51,28 @@ export default function Settings() {
 
       <Section title="Server">
         <Row icon="server" label={serverLabel ?? 'Not connected'} c={c} />
+        <Pressable
+          testID="settings-open-account"
+          onPress={() => router.push('/account')}
+          style={[styles.row, { borderColor: c.border }]}
+        >
+          <View style={styles.rowLeft}>
+            <Feather name="user" size={18} color={c.textMuted} />
+            <Text style={[typography.body, { color: c.text }]}>Account & server info</Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={c.textFaint} />
+        </Pressable>
+        <Pressable
+          testID="settings-open-import"
+          onPress={() => router.push('/import')}
+          style={[styles.row, { borderColor: c.border }]}
+        >
+          <View style={styles.rowLeft}>
+            <Feather name="upload" size={18} color={c.textMuted} />
+            <Text style={[typography.body, { color: c.text }]}>Import links</Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={c.textFaint} />
+        </Pressable>
       </Section>
 
       <Section title="Reminders">

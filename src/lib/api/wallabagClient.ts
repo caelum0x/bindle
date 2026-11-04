@@ -1,12 +1,17 @@
 import type {
+  BulkSaveResult,
   EntriesPage,
+  EntryExportFormat,
   EntryFilter,
   TokenResponse,
   WallabagAnnotation,
   WallabagAnnotationRange,
+  WallabagConfig,
   WallabagCredentials,
   WallabagEntry,
+  WallabagServerInfo,
   WallabagTag,
+  WallabagUser,
 } from './types';
 import { WallabagApiError } from './types';
 
@@ -305,6 +310,103 @@ export class WallabagClient {
       method: 'DELETE',
     });
     if (!res.ok) throw new WallabagApiError(`Could not remove highlight (${res.status})`, res.status);
+  }
+
+  /** Server-side full-text search (`GET /api/search.{_format}` —
+   * `src/Controller/Api/SearchRestController.php`), across title/content/url/
+   * annotations. Uses the same Pagerfanta/HATEOAS pagination envelope as
+   * `fetchEntries`, so the response shape (and this parsing) is identical. */
+  async searchEntriesServer(term: string, page = 1, perPage = 30): Promise<EntriesPage> {
+    const params = new URLSearchParams({ term, page: String(page), perPage: String(perPage) });
+    const res = await this.authedFetch(`/api/search.json?${params.toString()}`);
+    if (!res.ok) throw new WallabagApiError(`Search failed (${res.status})`, res.status);
+    const json = await res.json();
+    return {
+      page: json.page,
+      limit: json.limit,
+      pages: json.pages,
+      total: json.total,
+      items: json._embedded?.items ?? [],
+    };
+  }
+
+  /** Re-fetches and re-parses an entry's content from its original URL
+   * (`PATCH /api/entries/{entry}/reload.json`). The server answers 304 (no
+   * body) when it couldn't update the content — not an error, just "nothing
+   * changed" — so this returns `null` for that case instead of throwing. */
+  async reloadEntry(id: number): Promise<WallabagEntry | null> {
+    const res = await this.authedFetch(`/api/entries/${id}/reload.json`, { method: 'PATCH' });
+    if (res.status === 304) return null;
+    if (!res.ok) throw new WallabagApiError(`Could not refresh this article (${res.status})`, res.status);
+    return res.json();
+  }
+
+  /** Downloads one entry in a predefined format (`GET /api/entries/{entry}/
+   * export.{_format}` — epub/pdf/txt/csv/xml, real server-rendered content,
+   * no client-side conversion). Returns the raw bytes so the caller can write
+   * them straight to a file (`expo-file-system`'s `File.write` accepts an
+   * `ArrayBuffer` directly, binary or text, with no base64 round-trip). */
+  async exportEntry(
+    id: number,
+    format: EntryExportFormat
+  ): Promise<{ bytes: ArrayBuffer; contentType: string }> {
+    const res = await this.authedFetch(`/api/entries/${id}/export.${format}`);
+    if (!res.ok) throw new WallabagApiError(`Could not export this article (${res.status})`, res.status);
+    const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
+    const bytes = await res.arrayBuffer();
+    return { bytes, contentType };
+  }
+
+  /** Checks whether a URL is already saved (`GET /api/entries/exists.json?url=`
+   * — `src/Controller/Api/EntryRestController.php::getEntriesExistsAction`,
+   * single-`url` form of the call, which answers `{ exists: boolean }`). */
+  async checkEntryExists(url: string): Promise<boolean> {
+    const params = new URLSearchParams({ url });
+    const res = await this.authedFetch(`/api/entries/exists.json?${params.toString()}`);
+    if (!res.ok) throw new WallabagApiError(`Could not check that link (${res.status})`, res.status);
+    const json = await res.json();
+    return Boolean(json.exists);
+  }
+
+  /** Account config/settings (`GET /api/config.json`). */
+  async fetchConfig(): Promise<WallabagConfig> {
+    const res = await this.authedFetch('/api/config.json');
+    if (!res.ok) throw new WallabagApiError(`Could not load account settings (${res.status})`, res.status);
+    return res.json();
+  }
+
+  /** Signed-in user's identity (`GET /api/user.json`). */
+  async fetchUser(): Promise<WallabagUser> {
+    const res = await this.authedFetch('/api/user.json');
+    if (!res.ok) throw new WallabagApiError(`Could not load account info (${res.status})`, res.status);
+    return res.json();
+  }
+
+  /** Server application name/version/registration flag (`GET /api/info.json`). */
+  async fetchServerInfo(): Promise<WallabagServerInfo> {
+    const res = await this.authedFetch('/api/info.json');
+    if (!res.ok) throw new WallabagApiError(`Could not load server info (${res.status})`, res.status);
+    return res.json();
+  }
+
+  /** Permanently deletes a tag from every entry that carries it (`DELETE
+   * /api/tags/{tag}.json`, tag addressed by id — `TagRestController::deleteTagAction`). */
+  async deleteTagGlobally(tagId: number): Promise<void> {
+    const res = await this.authedFetch(`/api/tags/${tagId}.json`, { method: 'DELETE' });
+    if (!res.ok) throw new WallabagApiError(`Could not delete tag (${res.status})`, res.status);
+  }
+
+  /** Bulk-saves a list of URLs in one request (`POST /api/entries/lists.json`
+   * — `EntryRestController::postEntriesListAction`). The server reads `urls`
+   * from the query string even on this POST (it calls `$request->query->get`,
+   * not the form body), so it's sent the same way here. */
+  async bulkSaveLinks(urls: string[]): Promise<BulkSaveResult[]> {
+    const params = new URLSearchParams({ urls: JSON.stringify(urls) });
+    const res = await this.authedFetch(`/api/entries/lists.json?${params.toString()}`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new WallabagApiError(`Could not import those links (${res.status})`, res.status);
+    return res.json();
   }
 }
 

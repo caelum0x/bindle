@@ -16,9 +16,11 @@ import { router } from 'expo-router';
 import { useAuthStore } from '../../lib/auth/authStore';
 import { useTheme } from '../../lib/useTheme';
 import { radius, spacing, typography } from '../../lib/theme';
-import { saveLink } from '../../lib/entriesRepository';
+import { checkUrlAlreadySaved, saveLink } from '../../lib/entriesRepository';
 import { getErrorMessage } from '../../lib/errors';
 import { looksLikeUrl } from '../../lib/url';
+
+const EXISTS_CHECK_DEBOUNCE_MS = 500;
 
 export default function Add() {
   const { c } = useTheme();
@@ -30,12 +32,27 @@ export default function Add() {
   const [saving, setSaving] = useState(false);
   const [savedTitle, setSavedTitle] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [alreadySaved, setAlreadySaved] = useState(false);
 
   useEffect(() => {
     Clipboard.getStringAsync().then((text) => {
       if (looksLikeUrl(text)) setClipboardSuggestion(text.trim());
     });
   }, []);
+
+  useEffect(() => {
+    setAlreadySaved(false);
+    const target = url.trim();
+    if (!client || !looksLikeUrl(target)) return;
+    const timer = setTimeout(() => {
+      checkUrlAlreadySaved(client, target)
+        .then(setAlreadySaved)
+        .catch(() => {
+          // Can't confirm (offline/old server) — don't block saving on an unknown.
+        });
+    }, EXISTS_CHECK_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [client, url]);
 
   const save = async (target: string) => {
     if (!client || !looksLikeUrl(target)) {
@@ -94,6 +111,15 @@ export default function Add() {
           </Pressable>
         ) : null}
 
+        {alreadySaved ? (
+          <View style={[styles.suggestion, { backgroundColor: c.surfaceAlt, borderColor: c.border }]}>
+            <Feather name="info" size={14} color={c.textMuted} />
+            <Text style={[typography.caption, { color: c.textMuted, flex: 1 }]} numberOfLines={1}>
+              Already in your bindle.
+            </Text>
+          </View>
+        ) : null}
+
         {error ? <Text style={[typography.caption, { color: c.danger, marginTop: spacing.sm }]}>{error}</Text> : null}
         {savedTitle ? (
           <View style={[styles.saved, { backgroundColor: c.surfaceAlt }]}>
@@ -115,6 +141,14 @@ export default function Add() {
           ) : (
             <Text style={[typography.heading, { color: url ? c.background : c.textFaint }]}>Save</Text>
           )}
+        </Pressable>
+
+        <Pressable
+          testID="add-open-import"
+          onPress={() => router.push('/import')}
+          style={{ marginTop: spacing.lg, alignSelf: 'center' }}
+        >
+          <Text style={[typography.caption, { color: c.textMuted }]}>Import multiple links at once</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>

@@ -76,6 +76,46 @@ export type WallabagAnnotation = {
   annotator_schema_version?: string;
 };
 
+/** Account config fields exposed under JMS Serializer's `config_api` group
+ * (`src/Entity/Config.php`, github.com/wallabag/wallabag) — the fields the
+ * server actually returns from `GET /api/config`, not every column on the
+ * entity (some, like `pocket_consumer_key`, carry no `config_api` group and
+ * are never serialized to this endpoint). */
+export type WallabagConfig = {
+  id: number;
+  items_per_page: number;
+  language: string;
+  reading_speed: number | null;
+  action_mark_as_read: number | null;
+  list_mode: number | null;
+  display_thumbnails: number | null;
+};
+
+/** Fields under JMS Serializer's `user_api` group (`src/Entity/User.php`) —
+ * what `GET /api/user` actually returns. */
+export type WallabagUser = {
+  id: number;
+  name: string | null;
+  username: string;
+  email: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** `GET /api/info` response shape (`src/Entity/Api/ApplicationInfo.php`). */
+export type WallabagServerInfo = {
+  appname: string;
+  version: string;
+  allowed_registration: boolean;
+};
+
+export type EntryExportFormat = 'epub' | 'pdf' | 'txt' | 'csv' | 'xml';
+
+export type BulkSaveResult = {
+  url: string;
+  entry: number;
+};
+
 export class WallabagApiError extends Error {
   status?: number;
   constructor(message: string, status?: number) {
