@@ -101,6 +101,21 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
   }
 }
 
+/** Same as {@link readErrorMessage} but also surfaces the server's
+ * `mfaRequired` flag, since `/auth/login` uses that (not a different status
+ * code) to mean "password was right, send the 6-digit code now". */
+async function readLoginErrorBody(res: Response, fallback: string): Promise<{ message: string; mfaRequired: boolean }> {
+  try {
+    const json = await res.json();
+    return {
+      message: typeof json?.error === 'string' ? json.error : fallback,
+      mfaRequired: json?.mfaRequired === true,
+    };
+  } catch {
+    return { message: fallback, mfaRequired: false };
+  }
+}
+
 /** Creates a new Bindle account. Signing up IS the "connect" step now — no
  * server URL, no OAuth client id/secret, nothing to self-host. */
 export async function signup(email: string, password: string): Promise<{ token: string; user: BindleUser }> {
@@ -120,19 +135,94 @@ export async function signup(email: string, password: string): Promise<{ token: 
   return res.json();
 }
 
-export async function login(email: string, password: string): Promise<{ token: string; user: BindleUser }> {
+/** `mfaCode` is omitted on the first attempt; if the account has TOTP MFA
+ * enabled the server 401s with `mfaRequired: true` (not a different error
+ * shape) and the caller re-submits with the code the user just typed. */
+export async function login(email: string, password: string, mfaCode?: string): Promise<{ token: string; user: BindleUser }> {
   let res: Response;
   try {
     res = await fetch(`${BINDLE_API_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, ...(mfaCode ? { mfaCode } : {}) }),
     });
   } catch {
     throw new BindleApiError('Could not reach Bindle. Check your connection.');
   }
   if (!res.ok) {
-    throw new BindleApiError(await readErrorMessage(res, 'Incorrect email or password.'), res.status);
+    const { message, mfaRequired } = await readLoginErrorBody(res, 'Incorrect email or password.');
+    throw new BindleApiError(message, res.status, mfaRequired);
+  }
+  return res.json();
+}
+
+/** Native Google Sign-In: the mobile SDK (`expo-auth-session`) hands back a
+ * Google-issued `idToken`, which the server verifies against Google's own
+ * tokeninfo endpoint — no OAuth redirect dance needed from this client. */
+export async function oauthGoogle(idToken: string): Promise<{ token: string; user: BindleUser }> {
+  return oauthSignIn('google', idToken);
+}
+
+/** Sign in with Apple: `expo-apple-authentication` hands back Apple's
+ * `identityToken`, verified server-side against Apple's published JWKS. */
+export async function oauthApple(idToken: string): Promise<{ token: string; user: BindleUser }> {
+  return oauthSignIn('apple', idToken);
+}
+
+async function oauthSignIn(provider: 'google' | 'apple', idToken: string): Promise<{ token: string; user: BindleUser }> {
+  let res: Response;
+  try {
+    res = await fetch(`${BINDLE_API_URL}/auth/oauth/${provider}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    });
+  } catch {
+    throw new BindleApiError('Could not reach Bindle. Check your connection.');
+  }
+  if (!res.ok) {
+    throw new BindleApiError(
+      await readErrorMessage(res, provider === 'google' ? 'Google sign-in failed.' : 'Apple sign-in failed.'),
+      res.status
+    );
+  }
+  return res.json();
+}
+
+/** Requests a one-time sign-in link for `email`. Always resolves — the
+ * server is deliberately enumeration-safe (200 whether or not the account
+ * exists) so this never reveals which emails have accounts. */
+export async function requestMagicLink(email: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${BINDLE_API_URL}/auth/magiclink/request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+  } catch {
+    throw new BindleApiError('Could not reach Bindle. Check your connection.');
+  }
+  if (!res.ok) {
+    throw new BindleApiError(await readErrorMessage(res, 'Could not send your sign-in link.'), res.status);
+  }
+}
+
+/** Exchanges a magic-link token (read off the deep link the user tapped) for
+ * a real session. One-time use — the server rejects a replayed token. */
+export async function verifyMagicLink(token: string): Promise<{ token: string; user: BindleUser }> {
+  let res: Response;
+  try {
+    res = await fetch(`${BINDLE_API_URL}/auth/magiclink/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+  } catch {
+    throw new BindleApiError('Could not reach Bindle. Check your connection.');
+  }
+  if (!res.ok) {
+    throw new BindleApiError(await readErrorMessage(res, 'That sign-in link is invalid or has expired.'), res.status);
   }
   return res.json();
 }
@@ -166,6 +256,22 @@ export class BindleClient {
   async me(): Promise<BindleUser> {
     const res = await this.authedFetch('/me');
     if (!res.ok) throw new BindleApiError(await readErrorMessage(res, 'Could not load your account.'), res.status);
+    return res.json();
+  }
+
+  /** Starts TOTP MFA enrollment for the signed-in account: a fresh secret an
+   * authenticator app can scan (as `uri`, an `otpauth://` URI) or enter
+   * manually (as `secret`). Not yet enabled until {@link confirmMfaEnrollment}. */
+  async enrollMfa(): Promise<{ secret: string; uri: string }> {
+    const res = await this.authedFetch('/auth/mfa/enroll', { method: 'POST' });
+    if (!res.ok) throw new BindleApiError(await readErrorMessage(res, 'Could not start two-factor setup.'), res.status);
+    return res.json();
+  }
+
+  /** Confirms enrollment with a code from the authenticator app, turning MFA on. */
+  async confirmMfaEnrollment(code: string): Promise<{ mfaEnabled: boolean }> {
+    const res = await this.authedFetch('/auth/mfa/verify', { method: 'POST', body: JSON.stringify({ code }) });
+    if (!res.ok) throw new BindleApiError(await readErrorMessage(res, 'Incorrect verification code.'), res.status);
     return res.json();
   }
 

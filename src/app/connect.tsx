@@ -12,15 +12,31 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as WebBrowser from 'expo-web-browser';
+import { useIdTokenAuthRequest } from 'expo-auth-session/providers/google';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../lib/auth/authStore';
 import { useTheme } from '../lib/useTheme';
 import { radius, spacing, typography } from '../lib/theme';
 import { getErrorMessage } from '../lib/errors';
 import { usePremium } from '../premium/premium-context';
+import { requestMagicLink } from '../lib/api/bindleClient';
+import { BindleApiError } from '../lib/api/types';
+import {
+  GOOGLE_ANDROID_CLIENT_ID,
+  GOOGLE_IOS_CLIENT_ID,
+  GOOGLE_WEB_CLIENT_ID,
+  isGoogleSignInConfigured,
+} from '../lib/auth/oauthConfig';
+
+// Required once per app for `expo-auth-session`'s browser-based flow to
+// correctly hand control back to the app on completion (no-op on the native
+// Google Sign-In path this screen actually uses, but harmless either way).
+WebBrowser.maybeCompleteAuthSession();
 
 /** Set once the paywall has been shown after a first successful sign-up, so
  * signing back in later doesn't re-show it every time — the packaging rule
@@ -32,11 +48,18 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type Mode = 'signup' | 'signin';
 
+/** Apple's own SDK rejects with this code when the user dismisses the native
+ * sign-in sheet — not a real failure, so it should never surface an error. */
+const isAppleSignInCancellation = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && 'code' in error && (error as { code: unknown }).code === 'ERR_REQUEST_CANCELED';
+
 export default function Connect() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const signUp = useAuthStore((s) => s.signUp);
   const signIn = useAuthStore((s) => s.signIn);
+  const signInWithGoogle = useAuthStore((s) => s.signInWithGoogle);
+  const signInWithApple = useAuthStore((s) => s.signInWithApple);
   const { isPremium } = usePremium();
 
   const [mode, setMode] = useState<Mode>('signup');
@@ -44,6 +67,27 @@ export default function Connect() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Set once a correct password gets a `mfaRequired` response: the account
+  // has TOTP enabled, so the next submit should send the 6-digit code
+  // instead of re-sending the password step.
+  const [mfaStep, setMfaStep] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+
+  const [magicLinkMode, setMagicLinkMode] = useState(false);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
+  }, []);
+
+  const [, googleResponse, promptGoogleAsync] = useIdTokenAuthRequest({
+    iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
+    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
+  });
 
   const modeAnim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -64,10 +108,114 @@ export default function Connect() {
 
   const switchMode = (next: Mode) => {
     setError(null);
+    setMfaStep(false);
+    setMfaCode('');
+    setMagicLinkMode(false);
+    setMagicLinkSent(false);
     setMode(next);
   };
 
+  /** Shared landing step after ANY successful sign-up/sign-in (password,
+   * Google, Apple, or magic link) — same value-moment paywall rule applies
+   * no matter which auth method got the account signed in. */
+  const afterAuthSuccess = async (): Promise<void> => {
+    router.replace('/(tabs)/entries');
+    const alreadyShown = await SecureStore.getItemAsync(PAYWALL_SHOWN_KEY);
+    if (!alreadyShown) {
+      await SecureStore.setItemAsync(PAYWALL_SHOWN_KEY, '1');
+      if (!isPremium) router.push('/paywall?source=connect');
+    }
+  };
+
+  useEffect(() => {
+    if (!googleResponse) return;
+    if (googleResponse.type === 'success' && googleResponse.params.id_token) {
+      (async () => {
+        setError(null);
+        setSubmitting(true);
+        try {
+          await signInWithGoogle(googleResponse.params.id_token);
+          await afterAuthSuccess();
+        } catch (err: unknown) {
+          setError(getErrorMessage(err, 'Google sign-in failed.'));
+        } finally {
+          setSubmitting(false);
+        }
+      })();
+    } else if (googleResponse.type === 'error') {
+      setError('Google sign-in failed.');
+    }
+    // afterAuthSuccess/signInWithGoogle are stable store/helper references; only re-run on a new response.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleResponse]);
+
+  const onPressGoogle = () => {
+    if (!isGoogleSignInConfigured) {
+      setError('Google sign-in is not set up yet.');
+      return;
+    }
+    setError(null);
+    promptGoogleAsync();
+  };
+
+  const onPressApple = async () => {
+    setError(null);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [AppleAuthentication.AppleAuthenticationScope.EMAIL],
+      });
+      if (!credential.identityToken) {
+        setError('Apple did not return a sign-in token.');
+        return;
+      }
+      setSubmitting(true);
+      await signInWithApple(credential.identityToken);
+      await afterAuthSuccess();
+    } catch (err: unknown) {
+      if (isAppleSignInCancellation(err)) return;
+      setError(getErrorMessage(err, 'Apple sign-in failed.'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onRequestMagicLink = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!EMAIL_RE.test(trimmedEmail)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      await requestMagicLink(trimmedEmail);
+      setMagicLinkSent(true);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Could not send your sign-in link.'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const onSubmit = async () => {
+    if (mfaStep) {
+      if (!/^\d{6}$/.test(mfaCode.trim())) {
+        setError('Enter the 6-digit code from your authenticator app.');
+        return;
+      }
+      setError(null);
+      setSubmitting(true);
+      try {
+        await signIn(email.trim().toLowerCase(), password, mfaCode.trim());
+        await afterAuthSuccess();
+      } catch (err: unknown) {
+        setError(getErrorMessage(err, 'Incorrect verification code.'));
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     const trimmedEmail = email.trim().toLowerCase();
     if (!EMAIL_RE.test(trimmedEmail)) {
       setError('Enter a valid email address.');
@@ -89,21 +237,13 @@ export default function Connect() {
       } else {
         await signIn(trimmedEmail, password);
       }
-      router.replace('/(tabs)/entries');
-
-      // The value moment: the account that was just created/signed into is
-      // about to show its own saved articles. Premium's whole pitch
-      // (unlimited bulk import, formatted export) is maximally relevant
-      // right here, so it is shown to every free account once, not only
-      // when one bumps into a specific limit. Pushed on top of the entries
-      // list (not a replace) so dismissing it either way lands on a fully
-      // working app.
-      const alreadyShown = await SecureStore.getItemAsync(PAYWALL_SHOWN_KEY);
-      if (!alreadyShown) {
-        await SecureStore.setItemAsync(PAYWALL_SHOWN_KEY, '1');
-        if (!isPremium) router.push('/paywall?source=connect');
-      }
+      await afterAuthSuccess();
     } catch (err: unknown) {
+      if (err instanceof BindleApiError && err.mfaRequired) {
+        setMfaStep(true);
+        setError(null);
+        return;
+      }
       setError(
         getErrorMessage(
           err,
@@ -133,59 +273,119 @@ export default function Connect() {
             <Feather name="bookmark" size={32} color={c.text} />
           </View>
           <Text style={[typography.title, { color: c.text, marginTop: spacing.lg, textAlign: 'center' }]}>
-            {mode === 'signup' ? 'Create your account' : 'Welcome back'}
+            {mfaStep ? 'Enter your code' : mode === 'signup' ? 'Create your account' : 'Welcome back'}
           </Text>
           <Text style={[typography.body, { color: c.textMuted, marginTop: spacing.xs, textAlign: 'center' }]}>
-            {mode === 'signup'
-              ? 'Save anything, read it anywhere. No server to set up.'
-              : 'Sign in to pick up where you left off.'}
+            {mfaStep
+              ? 'Open your authenticator app and enter the 6-digit code.'
+              : mode === 'signup'
+                ? 'Save anything, read it anywhere. No server to set up.'
+                : 'Sign in to pick up where you left off.'}
           </Text>
         </View>
 
-        <View style={[styles.tabRow, { borderColor: c.border }]}>
-          <ModeTab c={c} label="Sign up" active={mode === 'signup'} onPress={() => switchMode('signup')} />
-          <ModeTab c={c} label="Sign in" active={mode === 'signin'} onPress={() => switchMode('signin')} />
-        </View>
+        {!mfaStep ? (
+          <View style={[styles.tabRow, { borderColor: c.border }]}>
+            <ModeTab c={c} label="Sign up" active={mode === 'signup'} onPress={() => switchMode('signup')} />
+            <ModeTab c={c} label="Sign in" active={mode === 'signin'} onPress={() => switchMode('signin')} />
+          </View>
+        ) : null}
 
         <Animated.View style={modeAnimatedStyle}>
-          <View style={{ marginTop: spacing.xl }}>
-            <Text style={[typography.caption, { color: c.textMuted, marginBottom: spacing.xs }]}>Email</Text>
-            <TextInput
-              testID="field-email"
-              accessibilityLabel="Email"
-              value={email}
-              onChangeText={(v) => {
-                setEmail(v);
-                setError(null);
-              }}
-              placeholder="you@example.com"
-              placeholderTextColor={c.textFaint}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-              style={[styles.input, { color: c.text, backgroundColor: c.surface, borderColor: error ? c.danger : c.border }]}
-            />
-          </View>
-          <View style={{ marginTop: spacing.md }}>
-            <Text style={[typography.caption, { color: c.textMuted, marginBottom: spacing.xs }]}>Password</Text>
-            <TextInput
-              testID="field-password"
-              accessibilityLabel="Password"
-              value={password}
-              onChangeText={(v) => {
-                setPassword(v);
-                setError(null);
-              }}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="go"
-              onSubmitEditing={onSubmit}
-              placeholderTextColor={c.textFaint}
-              style={[styles.input, { color: c.text, backgroundColor: c.surface, borderColor: error ? c.danger : c.border }]}
-            />
-          </View>
+          {mfaStep ? (
+            <View style={{ marginTop: spacing.xl }}>
+              <Text style={[typography.caption, { color: c.textMuted, marginBottom: spacing.xs }]}>Verification code</Text>
+              <TextInput
+                testID="field-mfa-code"
+                accessibilityLabel="Verification code"
+                value={mfaCode}
+                onChangeText={(v) => {
+                  setMfaCode(v);
+                  setError(null);
+                }}
+                placeholder="123456"
+                placeholderTextColor={c.textFaint}
+                keyboardType="number-pad"
+                maxLength={6}
+                autoFocus
+                returnKeyType="go"
+                onSubmitEditing={onSubmit}
+                style={[styles.input, { color: c.text, backgroundColor: c.surface, borderColor: error ? c.danger : c.border }]}
+              />
+            </View>
+          ) : magicLinkMode ? (
+            <View style={{ marginTop: spacing.xl }}>
+              <Text style={[typography.caption, { color: c.textMuted, marginBottom: spacing.xs }]}>Email</Text>
+              <TextInput
+                testID="field-email-magiclink"
+                accessibilityLabel="Email"
+                value={email}
+                onChangeText={(v) => {
+                  setEmail(v);
+                  setError(null);
+                }}
+                placeholder="you@example.com"
+                placeholderTextColor={c.textFaint}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+                editable={!magicLinkSent}
+                returnKeyType="go"
+                onSubmitEditing={onRequestMagicLink}
+                style={[styles.input, { color: c.text, backgroundColor: c.surface, borderColor: error ? c.danger : c.border }]}
+              />
+              {magicLinkSent ? (
+                <View style={[styles.errorBanner, { backgroundColor: c.surfaceAlt, borderColor: c.border }]}>
+                  <Feather name="mail" size={16} color={c.textMuted} />
+                  <Text style={[typography.caption, { color: c.textMuted, flex: 1, lineHeight: 18 }]}>
+                    Check your email for a sign-in link.
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <>
+              <View style={{ marginTop: spacing.xl }}>
+                <Text style={[typography.caption, { color: c.textMuted, marginBottom: spacing.xs }]}>Email</Text>
+                <TextInput
+                  testID="field-email"
+                  accessibilityLabel="Email"
+                  value={email}
+                  onChangeText={(v) => {
+                    setEmail(v);
+                    setError(null);
+                  }}
+                  placeholder="you@example.com"
+                  placeholderTextColor={c.textFaint}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoFocus
+                  style={[styles.input, { color: c.text, backgroundColor: c.surface, borderColor: error ? c.danger : c.border }]}
+                />
+              </View>
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={[typography.caption, { color: c.textMuted, marginBottom: spacing.xs }]}>Password</Text>
+                <TextInput
+                  testID="field-password"
+                  accessibilityLabel="Password"
+                  value={password}
+                  onChangeText={(v) => {
+                    setPassword(v);
+                    setError(null);
+                  }}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="go"
+                  onSubmitEditing={onSubmit}
+                  placeholderTextColor={c.textFaint}
+                  style={[styles.input, { color: c.text, backgroundColor: c.surface, borderColor: error ? c.danger : c.border }]}
+                />
+              </View>
+            </>
+          )}
 
           {error ? (
             <View style={[styles.errorBanner, { backgroundColor: c.surfaceAlt, borderColor: c.border }]}>
@@ -196,21 +396,89 @@ export default function Connect() {
 
           <Pressable
             testID="connect-submit"
-            onPress={onSubmit}
-            disabled={submitting}
+            onPress={magicLinkMode ? onRequestMagicLink : onSubmit}
+            disabled={submitting || (magicLinkMode && magicLinkSent)}
             style={({ pressed }) => [
               styles.cta,
-              { backgroundColor: submitting ? c.surfaceAlt : c.accent, marginTop: spacing.xl, opacity: pressed && !submitting ? 0.85 : 1 },
+              {
+                backgroundColor: submitting || (magicLinkMode && magicLinkSent) ? c.surfaceAlt : c.accent,
+                marginTop: spacing.xl,
+                opacity: pressed && !submitting ? 0.85 : 1,
+              },
             ]}
           >
             {submitting ? (
               <ActivityIndicator color={c.background} />
             ) : (
-              <Text style={[typography.heading, { color: c.background }]}>
-                {mode === 'signup' ? 'Create account' : 'Sign in'}
+              <Text style={[typography.heading, { color: magicLinkMode && magicLinkSent ? c.textMuted : c.background }]}>
+                {mfaStep
+                  ? 'Verify'
+                  : magicLinkMode
+                    ? magicLinkSent
+                      ? 'Link sent'
+                      : 'Send sign-in link'
+                    : mode === 'signup'
+                      ? 'Create account'
+                      : 'Sign in'}
               </Text>
             )}
           </Pressable>
+
+          {!mfaStep ? (
+            <Pressable
+              testID="connect-toggle-magiclink"
+              onPress={() => {
+                setError(null);
+                setMagicLinkSent(false);
+                setMagicLinkMode((v) => !v);
+              }}
+              style={{ marginTop: spacing.md, alignItems: 'center' }}
+            >
+              <Text style={[typography.caption, { color: c.textMuted }]}>
+                {magicLinkMode ? 'Use a password instead' : 'Sign in with an email link instead'}
+              </Text>
+            </Pressable>
+          ) : null}
+
+          {!mfaStep && !magicLinkMode ? (
+            <>
+              <View style={styles.dividerRow}>
+                <View style={[styles.dividerLine, { backgroundColor: c.border }]} />
+                <Text style={[typography.caption, { color: c.textFaint }]}>or</Text>
+                <View style={[styles.dividerLine, { backgroundColor: c.border }]} />
+              </View>
+
+              {appleAvailable ? (
+                <Pressable
+                  testID="connect-apple"
+                  onPress={onPressApple}
+                  disabled={submitting}
+                  style={({ pressed }) => [
+                    styles.socialButton,
+                    { backgroundColor: c.surface, borderColor: c.border, opacity: pressed ? 0.85 : 1, marginTop: spacing.md },
+                  ]}
+                  accessibilityLabel="Continue with Apple"
+                >
+                  <Ionicons name="logo-apple" size={20} color={c.text} />
+                  <Text style={[typography.body, { color: c.text, fontWeight: '600' }]}>Continue with Apple</Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                testID="connect-google"
+                onPress={onPressGoogle}
+                disabled={submitting}
+                style={({ pressed }) => [
+                  styles.socialButton,
+                  { backgroundColor: c.surface, borderColor: c.border, opacity: pressed ? 0.85 : 1, marginTop: spacing.md },
+                ]}
+                accessibilityLabel="Continue with Google"
+              >
+                <Ionicons name="logo-google" size={20} color={c.text} />
+                <Text style={[typography.body, { color: c.text, fontWeight: '600' }]}>Continue with Google</Text>
+              </Pressable>
+            </>
+          ) : null}
         </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -274,6 +542,25 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.md,
     padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xl,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  socialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: 14,
     borderRadius: radius.md,
     borderWidth: 1,
   },

@@ -70,13 +70,18 @@ export type BindleUser = {
   id: string;
   email: string;
   createdAt: number;
+  mfaEnabled: boolean;
 };
 
 export class BindleApiError extends Error {
   status?: number;
-  constructor(message: string, status?: number) {
+  /** Set only by `/auth/login` 401s that mean "password was correct, now send
+   * the TOTP code" — distinct from every other 401 (which means "try again"). */
+  mfaRequired?: boolean;
+  constructor(message: string, status?: number, mfaRequired?: boolean) {
     super(message);
     this.name = 'BindleApiError';
     this.status = status;
+    this.mfaRequired = mfaRequired;
   }
 }

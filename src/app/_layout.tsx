@@ -22,6 +22,7 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="onboarding" />
           <Stack.Screen name="connect" />
+          <Stack.Screen name="auth/magiclink" options={{ presentation: 'card', headerShown: false }} />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen
             name="entry/[id]"
