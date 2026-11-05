@@ -113,8 +113,8 @@ export default function Entries() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top }}>
-      <View style={styles.header}>
-        <Text style={[typography.title, { color: c.text }]}>Bindle</Text>
+      <View style={styles.header} accessibilityLabel="Bindle">
+        <Feather name="bookmark" size={22} color={c.text} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
           {offline ? (
             <Text style={[typography.tiny, { color: c.textFaint }]}>OFFLINE · SHOWING SAVED COPY</Text>

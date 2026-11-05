@@ -47,9 +47,12 @@ export default function Settings() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top }}>
-      <Text style={[typography.title, { color: c.text, paddingHorizontal: spacing.lg, marginTop: spacing.md }]}>
-        Settings
-      </Text>
+      <View
+        style={{ paddingHorizontal: spacing.lg, marginTop: spacing.md }}
+        accessibilityLabel="Settings"
+      >
+        <Feather name="settings" size={22} color={c.text} />
+      </View>
 
       <Section title="Premium">
         <Pressable

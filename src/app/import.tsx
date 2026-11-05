@@ -85,7 +85,9 @@ export default function Import() {
             accessibilityLabel="Back"
             onPress={() => router.back()}
           />
-          <Text style={[typography.heading, { color: c.text }]}>Import links</Text>
+          <View accessibilityLabel="Import links">
+            <Feather name="download" size={18} color={c.text} />
+          </View>
           <View style={{ width: 40 }} />
         </View>
 

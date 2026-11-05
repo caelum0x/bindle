@@ -1,4 +1,5 @@
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuthStore } from '../lib/auth/authStore';
@@ -16,14 +17,14 @@ export default function Account() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top }}>
-      <View style={styles.header}>
+      <View style={styles.header} accessibilityLabel="Account">
         <IconButton
           testID="account-back"
           name="arrow-left"
           accessibilityLabel="Back"
           onPress={() => router.back()}
         />
-        <Text style={[typography.heading, { color: c.text }]}>Account</Text>
+        <Feather name="user" size={18} color={c.text} />
         <View style={{ width: 40 }} />
       </View>
 

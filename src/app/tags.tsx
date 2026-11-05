@@ -69,14 +69,14 @@ export default function Tags() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top }}>
-      <View style={styles.header}>
+      <View style={styles.header} accessibilityLabel="Tags">
         <IconButton
           testID="tags-back"
           name="arrow-left"
           accessibilityLabel="Back"
           onPress={() => router.back()}
         />
-        <Text style={[typography.heading, { color: c.text }]}>Tags</Text>
+        <Feather name="tag" size={18} color={c.text} />
         <View style={{ width: 40 }} />
       </View>
       {offline ? (
