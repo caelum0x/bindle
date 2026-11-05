@@ -38,7 +38,7 @@ import { radius, spacing, typography } from '../lib/theme';
 
 const BENEFITS: readonly { icon: React.ComponentProps<typeof Feather>['name']; text: string }[] = [
   { icon: 'upload', text: `Bulk-import any number of links at once (free stops at ${FREE_MAX_BULK_IMPORT})` },
-  { icon: 'file-text', text: 'Export articles as EPUB and PDF, not just plain text' },
+  { icon: 'file-text', text: 'Export articles as formatted HTML, not just plain text' },
   { icon: 'heart', text: 'Fund ongoing development of an independent, ad-free client' },
 ];
 

@@ -287,10 +287,10 @@ function sanitizeFilename(title: string): string {
   return trimmed.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 80).trim() || 'article';
 }
 
-/** Exports one entry as a real file (epub/pdf/txt/csv/xml, rendered by the
- * server, not a client-side conversion) and opens the native share sheet on
- * it. Writes to the app's cache directory since this is a disposable, re-
- * downloadable copy, not something Bindle needs to keep around. */
+/** Exports one entry as a real file (txt/html, rendered by the server, not a
+ * client-side conversion) and opens the native share sheet on it. Writes to
+ * the app's cache directory since this is a disposable, re-downloadable
+ * copy, not something Bindle needs to keep around. */
 export async function exportEntryToFile(
   client: BindleClient,
   entry: Entry,
