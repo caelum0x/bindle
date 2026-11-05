@@ -1,7 +1,7 @@
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import type { WallabagClient } from './api/wallabagClient';
-import type { BulkSaveResult, EntryExportFormat, EntryFilter, WallabagEntry, WallabagTag } from './api/types';
+import type { BindleClient } from './api/bindleClient';
+import type { BulkSaveResult, EntryExportFormat, EntryFilter, Entry, Tag } from './api/types';
 import {
   getCachedEntries,
   getCachedEntry,
@@ -19,12 +19,12 @@ import { matchesQuery } from './search';
 import { drainPendingShareSaves } from './sync/pendingShareSaves';
 
 export type EntriesResult = {
-  items: WallabagEntry[];
+  items: Entry[];
   fromCache: boolean;
 };
 
 export type TagsResult = {
-  items: WallabagTag[];
+  items: Tag[];
   fromCache: boolean;
 };
 
@@ -46,7 +46,7 @@ export async function syncPendingShareSaves(): Promise<number> {
  * `tag` (a tag label or slug) narrows the list to entries carrying that tag, same as
  * the Unread/Starred/Archived filters, and composes with them. */
 export async function listEntries(
-  client: WallabagClient,
+  client: BindleClient,
   filter: EntryFilter,
   tag?: string
 ): Promise<EntriesResult> {
@@ -66,7 +66,7 @@ export async function listEntries(
 
 /** Lists every tag in the account, preferring the live server list but falling back
  * to tags derived from whatever is cached offline. */
-export async function listTags(client: WallabagClient): Promise<TagsResult> {
+export async function listTags(client: BindleClient): Promise<TagsResult> {
   try {
     const tags = await client.fetchTags();
     return { items: tags, fromCache: false };
@@ -95,12 +95,12 @@ const SEARCH_MAX_PAGES = 6; // 6 * 100 = up to 600 entries walked per live searc
  * matched via `matchesQuery`, so a working search never regresses just because
  * one endpoint had a bad day. If nothing can be reached at all, falls back to
  * `searchCachedEntries`. */
-export async function searchEntries(client: WallabagClient, query: string): Promise<EntriesResult> {
+export async function searchEntries(client: BindleClient, query: string): Promise<EntriesResult> {
   const q = query.trim();
   if (!q) return { items: [], fromCache: false };
 
   try {
-    const matches: WallabagEntry[] = [];
+    const matches: Entry[] = [];
     let page = 1;
     let totalPages = 1;
     while (page <= totalPages && page <= SEARCH_MAX_PAGES) {
@@ -115,7 +115,7 @@ export async function searchEntries(client: WallabagClient, query: string): Prom
     // Server search unavailable — fall through to the page-walk below.
   }
 
-  const matches: WallabagEntry[] = [];
+  const matches: Entry[] = [];
   let page = 1;
   let totalPages = 1;
   let reachedServer = false;
@@ -147,20 +147,20 @@ export async function searchEntries(client: WallabagClient, query: string): Prom
 /** Adds a tag (by free-text label, server creates it if new) to an entry and
  * refreshes the local cache with the server's authoritative, updated entry. */
 export async function addTagToEntry(
-  client: WallabagClient,
-  entry: WallabagEntry,
+  client: BindleClient,
+  entry: Entry,
   label: string
-): Promise<WallabagEntry> {
+): Promise<Entry> {
   const updated = await client.addTagsToEntry(entry.id, label);
   await upsertEntries([updated]);
   return updated;
 }
 
 export async function removeTagFromEntry(
-  client: WallabagClient,
-  entry: WallabagEntry,
-  tagId: number
-): Promise<WallabagEntry> {
+  client: BindleClient,
+  entry: Entry,
+  tagId: string
+): Promise<Entry> {
   const updated = await client.removeTagFromEntry(entry.id, tagId);
   await upsertEntries([updated]);
   return updated;
@@ -169,9 +169,9 @@ export async function removeTagFromEntry(
 /** Load a single entry's full content, preferring live data (content is only ever
  * sent in full by the server) but falling back to whatever was cached earlier. */
 export async function loadEntry(
-  client: WallabagClient,
-  id: number
-): Promise<{ entry: WallabagEntry; fromCache: boolean }> {
+  client: BindleClient,
+  id: string
+): Promise<{ entry: Entry; fromCache: boolean }> {
   try {
     const entry = await client.fetchEntry(id);
     await upsertEntries([entry]);
@@ -183,7 +183,7 @@ export async function loadEntry(
   }
 }
 
-/** Saves a URL to Wallabag. Used by both the main app's Add screen (paste-a-URL
+/** Saves a URL to Bindle's own account. Used by both the main app's Add screen (paste-a-URL
  * flow) and the iOS share extension (`src/ShareExtension.tsx`) — the exact same
  * function, not a duplicated save path, since it's the real authoritative save
  * logic this app already relies on.
@@ -194,7 +194,7 @@ export async function loadEntry(
  * fully write to, or any other local-storage hiccup) must not be reported to the
  * caller as "the save failed" — that would risk the user retrying and creating a
  * duplicate server-side entry for something that already saved correctly. */
-export async function saveLink(client: WallabagClient, url: string): Promise<WallabagEntry> {
+export async function saveLink(client: BindleClient, url: string): Promise<Entry> {
   const entry = await client.saveEntry(url);
   try {
     await upsertEntries([entry]);
@@ -207,8 +207,8 @@ export async function saveLink(client: WallabagClient, url: string): Promise<Wal
 /** Optimistically flips a flag locally, then tries the server. If the server call
  * fails (offline), the change is queued and will be replayed by `flushPendingActions`. */
 export async function toggleArchive(
-  client: WallabagClient,
-  entry: WallabagEntry
+  client: BindleClient,
+  entry: Entry
 ): Promise<void> {
   const next: 0 | 1 = entry.is_archived ? 0 : 1;
   await updateCachedFlags(entry.id, { is_archived: next });
@@ -219,7 +219,7 @@ export async function toggleArchive(
   }
 }
 
-export async function toggleStar(client: WallabagClient, entry: WallabagEntry): Promise<void> {
+export async function toggleStar(client: BindleClient, entry: Entry): Promise<void> {
   const next: 0 | 1 = entry.is_starred ? 0 : 1;
   await updateCachedFlags(entry.id, { is_starred: next });
   try {
@@ -233,14 +233,14 @@ export async function toggleStar(client: WallabagClient, entry: WallabagEntry): 
  * server confirms it's gone. A failed/offline delete must leave the cached copy intact
  * — otherwise it would silently wipe the user's only offline copy of an article the
  * server never actually deleted. */
-export async function removeEntry(client: WallabagClient, id: number): Promise<void> {
+export async function removeEntry(client: BindleClient, id: string): Promise<void> {
   await client.deleteEntry(id);
   await removeCachedEntry(id);
 }
 
 /** Replays any archive/star changes made while offline. Call this on app foreground
  * and after a successful list refresh. */
-export async function flushPendingActions(client: WallabagClient): Promise<number> {
+export async function flushPendingActions(client: BindleClient): Promise<number> {
   const pending = await getPendingActions();
   let replayed = 0;
   for (const action of pending) {
@@ -261,16 +261,16 @@ export async function flushPendingActions(client: WallabagClient): Promise<numbe
 }
 
 /** Re-fetches an entry's content from its original source URL (fixes a
- * mis-parsed article without having to delete and re-save it). The server
- * returns 304 with no body when nothing could be refreshed; the caller sees
- * that as `refreshed: false` rather than a thrown error. */
+ * mis-parsed article without having to delete and re-save it). Bindle's own
+ * backend always re-runs extraction and returns the updated article, so this
+ * either succeeds or throws — there is no "nothing changed" case to report. */
 export async function reloadEntryContent(
-  client: WallabagClient,
-  id: number
-): Promise<{ entry: WallabagEntry | null; refreshed: boolean }> {
+  client: BindleClient,
+  id: string
+): Promise<{ entry: Entry | null; refreshed: boolean }> {
   const entry = await client.reloadEntry(id);
-  if (entry) await upsertEntries([entry]);
-  return { entry, refreshed: entry !== null };
+  await upsertEntries([entry]);
+  return { entry, refreshed: true };
 }
 
 /** Checks whether a URL is already saved, so the Add screen can point the user
@@ -278,7 +278,7 @@ export async function reloadEntryContent(
  * by design — an offline cache can't tell whether *today's* current server
  * state has the URL, so a failure here should be treated as "unknown", not
  * "not saved". */
-export async function checkUrlAlreadySaved(client: WallabagClient, url: string): Promise<boolean> {
+export async function checkUrlAlreadySaved(client: BindleClient, url: string): Promise<boolean> {
   return client.checkEntryExists(url);
 }
 
@@ -292,8 +292,8 @@ function sanitizeFilename(title: string): string {
  * it. Writes to the app's cache directory since this is a disposable, re-
  * downloadable copy, not something Bindle needs to keep around. */
 export async function exportEntryToFile(
-  client: WallabagClient,
-  entry: WallabagEntry,
+  client: BindleClient,
+  entry: Entry,
   format: EntryExportFormat
 ): Promise<void> {
   const { bytes, contentType } = await client.exportEntry(entry.id, format);
@@ -306,23 +306,18 @@ export async function exportEntryToFile(
 }
 
 /** Bulk-saves a newline-separated list of URLs in one request (the Import
- * screen's paste-many-links flow) and writes through every real entry id the
- * server hands back into the local cache, same as a normal single save. */
-export async function bulkSaveLinks(client: WallabagClient, urls: string[]): Promise<BulkSaveResult[]> {
-  const results = await client.bulkSaveLinks(urls);
-  const ids = results.map((r) => r.entry).filter((id): id is number => typeof id === 'number');
-  if (ids.length > 0) {
-    const fetched = await Promise.all(ids.map((id) => client.fetchEntry(id).catch(() => null)));
-    const entries = fetched.filter((e): e is WallabagEntry => e !== null);
-    if (entries.length > 0) await upsertEntries(entries);
-  }
-  return results;
+ * screen's paste-many-links flow). Doesn't write through to the local cache
+ * itself — the server already has every successfully-saved entry, and the
+ * next `listEntries` call (the Entries tab is always one screen away) picks
+ * them up through its normal `upsertEntries` write-through. */
+export async function bulkSaveLinks(client: BindleClient, urls: string[]): Promise<BulkSaveResult[]> {
+  return client.bulkSaveLinks(urls);
 }
 
 /** Permanently deletes a tag account-wide (every entry carrying it loses it),
  * then strips it from the local cache so the Tags screen and any cached
  * entries' tag chips stay consistent without needing a full re-sync. */
-export async function deleteTagGlobally(client: WallabagClient, tag: WallabagTag): Promise<void> {
+export async function deleteTagGlobally(client: BindleClient, tag: Tag): Promise<void> {
   await client.deleteTagGlobally(tag.id);
   await removeCachedTag(tag.id);
 }

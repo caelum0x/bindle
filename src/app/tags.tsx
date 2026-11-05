@@ -9,7 +9,7 @@ import { radius, spacing, typography } from '../lib/theme';
 import { IconButton } from '../components/IconButton';
 import { EmptyState } from '../components/EmptyState';
 import { deleteTagGlobally, listTags } from '../lib/entriesRepository';
-import type { WallabagTag } from '../lib/api/types';
+import type { Tag } from '../lib/api/types';
 import { getErrorMessage } from '../lib/errors';
 
 export default function Tags() {
@@ -17,7 +17,7 @@ export default function Tags() {
   const insets = useSafeAreaInsets();
   const client = useAuthStore((s) => s.client);
 
-  const [tags, setTags] = useState<WallabagTag[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,14 +37,14 @@ export default function Tags() {
     }, [client])
   );
 
-  const openTag = (tagItem: WallabagTag) => {
+  const openTag = (tagItem: Tag) => {
     router.push({
       pathname: '/(tabs)/entries',
       params: { tag: tagItem.slug || tagItem.label, tagLabel: tagItem.label },
     });
   };
 
-  const onDeleteTag = (tagItem: WallabagTag) => {
+  const onDeleteTag = (tagItem: Tag) => {
     if (!client) return;
     Alert.alert(
       'Delete tag',

@@ -6,7 +6,7 @@ import { loadStoredClient } from './lib/auth/sharedAuth';
 import { appendPendingShareSave } from './lib/sync/pendingShareSaves';
 import { extractFirstUrl } from './lib/url';
 import { getErrorMessage } from './lib/errors';
-import type { WallabagEntry } from './lib/api/types';
+import type { Entry } from './lib/api/types';
 
 type Stage = 'resolving' | 'saving' | 'saved' | 'needsAuth' | 'invalid' | 'error';
 
@@ -25,7 +25,7 @@ type Stage = 'resolving' | 'saving' | 'saved' | 'needsAuth' | 'invalid' | 'error
  */
 export default function ShareExtension({ url, text }: InitialProps) {
   const [stage, setStage] = useState<Stage>('resolving');
-  const [savedEntry, setSavedEntry] = useState<WallabagEntry | null>(null);
+  const [savedEntry, setSavedEntry] = useState<Entry | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -104,9 +104,9 @@ export default function ShareExtension({ url, text }: InitialProps) {
 
       {stage === 'needsAuth' && (
         <>
-          <Text style={styles.heading}>Connect Bindle first</Text>
+          <Text style={styles.heading}>Sign in to Bindle first</Text>
           <Text style={styles.label}>
-            Open Bindle and connect your Wallabag server, then share this link again.
+            Open Bindle and sign in, then share this link again.
           </Text>
           <CloseButton />
         </>

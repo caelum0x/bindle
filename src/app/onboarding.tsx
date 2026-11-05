@@ -21,9 +21,9 @@ const SLIDES: { icon: keyof typeof Feather.glyphMap; title: string; body: string
     body: 'Everything you save is cached on your phone — read it with no signal.',
   },
   {
-    icon: 'server',
-    title: 'Your server, your data',
-    body: 'Bindle connects to a Wallabag server you run. Nothing is stored anywhere else.',
+    icon: 'zap',
+    title: 'No setup',
+    body: 'Create an account in seconds. No server to run, nothing to configure.',
   },
 ];
 
@@ -88,7 +88,7 @@ export default function Onboarding() {
       </View>
       <Pressable onPress={next} style={[styles.cta, { backgroundColor: c.accent }]}>
         <Text style={[typography.heading, { color: c.background }]}>
-          {index === SLIDES.length - 1 ? 'Connect my server' : 'Next'}
+          {index === SLIDES.length - 1 ? 'Get started' : 'Next'}
         </Text>
       </Pressable>
     </View>

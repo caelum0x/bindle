@@ -19,7 +19,7 @@ import { EntryCard } from '../components/EntryCard';
 import { EmptyState } from '../components/EmptyState';
 import { searchEntries, toggleArchive, toggleStar } from '../lib/entriesRepository';
 import { snippetFor } from '../lib/search';
-import type { WallabagEntry } from '../lib/api/types';
+import type { Entry } from '../lib/api/types';
 import { getErrorMessage } from '../lib/errors';
 
 const DEBOUNCE_MS = 350;
@@ -34,7 +34,7 @@ export default function Search() {
 
   const [query, setQuery] = useState('');
   const [searchedFor, setSearchedFor] = useState('');
-  const [items, setItems] = useState<WallabagEntry[]>([]);
+  const [items, setItems] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(false);
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export default function Search() {
     };
   }, [query, client]);
 
-  const onToggleStar = async (entry: WallabagEntry) => {
+  const onToggleStar = async (entry: Entry) => {
     if (!client) return;
     setItems((prev) =>
       prev.map((e) => (e.id === entry.id ? { ...e, is_starred: entry.is_starred ? 0 : 1 } : e))
@@ -78,7 +78,7 @@ export default function Search() {
     await toggleStar(client, entry);
   };
 
-  const onToggleArchive = async (entry: WallabagEntry) => {
+  const onToggleArchive = async (entry: Entry) => {
     if (!client) return;
     setItems((prev) =>
       prev.map((e) => (e.id === entry.id ? { ...e, is_archived: entry.is_archived ? 0 : 1 } : e))

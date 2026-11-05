@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { KEYCHAIN_ACCESS_GROUP } from '../auth/sharedAuth';
-import type { WallabagEntry } from '../api/types';
+import type { Entry } from '../api/types';
 
 /**
  * Cross-process hand-off queue for entries saved by the iOS Share Extension.
@@ -33,7 +33,7 @@ import type { WallabagEntry } from '../api/types';
  * fine without it in the meantime.
  */
 
-export type PendingShareSave = Omit<WallabagEntry, 'content'>;
+export type PendingShareSave = Omit<Entry, 'content'>;
 
 const PENDING_SHARE_SAVES_KEY = 'bindle.pendingShareSaves.v1';
 
@@ -60,7 +60,7 @@ async function readPendingShareSaves(): Promise<PendingShareSave[]> {
  * the user as a save failure — same contract `saveLink`'s own local-cache
  * write already follows. De-dupes by entry id so re-sharing the same link
  * before the main app has drained the queue doesn't pile up duplicates. */
-export async function appendPendingShareSave(entry: WallabagEntry): Promise<void> {
+export async function appendPendingShareSave(entry: Entry): Promise<void> {
   const { content, ...withoutContent } = entry;
   const existing = await readPendingShareSaves();
   const next = [...existing.filter((e) => e.id !== entry.id), withoutContent];

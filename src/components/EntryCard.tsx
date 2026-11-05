@@ -2,9 +2,9 @@ import { Pressable, Text, View, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '../lib/useTheme';
 import { radius, spacing, typography } from '../lib/theme';
-import type { WallabagEntry } from '../lib/api/types';
+import type { Entry } from '../lib/api/types';
 
-function estimateMinutes(entry: WallabagEntry): number {
+function estimateMinutes(entry: Entry): number {
   if (entry.reading_time && entry.reading_time > 0) return entry.reading_time;
   const words = (entry.content ?? '').split(/\s+/).length;
   return Math.max(1, Math.round(words / 200));
@@ -16,7 +16,7 @@ export function EntryCard({
   onToggleStar,
   onToggleArchive,
 }: {
-  entry: WallabagEntry;
+  entry: Entry;
   onPress: () => void;
   onToggleStar: () => void;
   onToggleArchive: () => void;

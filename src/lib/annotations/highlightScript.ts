@@ -1,15 +1,12 @@
-// Injected into the article WebView to turn a text selection into a real Wallabag
+// Injected into the article WebView to turn a text selection into a real
 // highlight ("annotation") and to re-render highlights already saved on the server.
 // Original code — not vendored from anywhere.
 //
 // Range addressing: `startOffset`/`endOffset` are absolute character offsets into the
 // article root's full visible text (`start`/`end` are unused placeholders, kept only
-// to satisfy the `WallabagAnnotationRange` shape shared with Wallabag's own
-// Annotator.js-schema fields — https://doc.wallabag.org, GET/POST
-// /api/annotations/{entry}.json; the server stores `ranges` as an opaque blob it never
-// interprets, so Bindle is free to define its own meaning here). An earlier version
-// used relative-XPath sibling-node-index paths instead (closer to Wallabag's web
-// client's own Annotator.js format) but that broke as soon as two highlights shared a
+// so this wire protocol didn't need to change across the self-host -> hosted-backend
+// pivot). An earlier version used relative-XPath sibling-node-index paths instead but
+// that broke as soon as two highlights shared a
 // paragraph: wrapping/unwrapping one highlight's `<mark>` shifts the sibling text-node
 // index every *other* highlight in the same paragraph was anchored to, so e.g.
 // deleting one highlight silently un-rendered any later highlight sharing its
@@ -235,7 +232,7 @@ export function buildHighlightScript(dark: boolean): string {
     var target = e.target;
     while (target && target !== document.body) {
       if (target.classList && target.classList.contains('bindle-highlight')) {
-        post({ type: 'deleteHighlightRequest', id: Number(target.getAttribute('data-annotation-id')) });
+        post({ type: 'deleteHighlightRequest', id: target.getAttribute('data-annotation-id') });
         return;
       }
       target = target.parentNode;

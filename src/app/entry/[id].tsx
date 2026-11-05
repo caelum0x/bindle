@@ -33,14 +33,14 @@ import {
   loadAnnotations,
 } from '../../lib/annotationsRepository';
 import { buildHighlightScript } from '../../lib/annotations/highlightScript';
-import type { EntryExportFormat, WallabagAnnotation, WallabagEntry } from '../../lib/api/types';
+import type { EntryExportFormat, Annotation, Entry } from '../../lib/api/types';
 import { getErrorMessage } from '../../lib/errors';
 import { usePremium } from '../../premium/premium-context';
 import { isExportFormatPremium } from '../../premium/limits';
 
 type HighlightMessage =
-  | { type: 'createHighlight'; quote: string; ranges: WallabagAnnotation['ranges'] }
-  | { type: 'deleteHighlightRequest'; id: number };
+  | { type: 'createHighlight'; quote: string; ranges: Annotation['ranges'] }
+  | { type: 'deleteHighlightRequest'; id: string };
 
 // react-native-webview's shipped types resolve (under plain `tsc`, which can't follow
 // its .ios.d.ts/.android.d.ts platform-specific forwardRef typings the way Metro does
@@ -53,7 +53,7 @@ const RefCapableWebView = WebView as unknown as ComponentType<
   ComponentProps<typeof WebView> & { ref?: Ref<WebViewHandle> }
 >;
 
-function buildHtml(entry: WallabagEntry, dark: boolean): string {
+function buildHtml(entry: Entry, dark: boolean): string {
   const bg = dark ? '#0B0B0B' : '#FFFFFF';
   const fg = dark ? '#F5F5F5' : '#111111';
   const muted = dark ? '#A3A3A3' : '#6B6B6B';
@@ -89,20 +89,20 @@ function escapeHtml(s: string) {
 
 export default function EntryDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const entryId = Number(id);
+  const entryId = id;
   const { c, dark } = useTheme();
   const insets = useSafeAreaInsets();
   const client = useAuthStore((s) => s.client);
   const { isPremium } = usePremium();
 
-  const [entry, setEntry] = useState<WallabagEntry | null>(null);
+  const [entry, setEntry] = useState<Entry | null>(null);
   const [offline, setOffline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newTag, setNewTag] = useState('');
   const [tagBusy, setTagBusy] = useState(false);
   const [tagError, setTagError] = useState<string | null>(null);
-  const [annotations, setAnnotations] = useState<WallabagAnnotation[]>([]);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [refreshingContent, setRefreshingContent] = useState(false);
   const [exporting, setExporting] = useState(false);
   const webViewRef = useRef<WebViewHandle>(null);
@@ -224,8 +224,7 @@ export default function EntryDetail() {
     if (!entry) return;
     Alert.alert('Export article', 'Choose a format', [
       { text: 'Cancel', style: 'cancel' },
-      { text: isPremium ? 'EPUB' : 'EPUB (Premium)', onPress: () => onExportFormat('epub') },
-      { text: isPremium ? 'PDF' : 'PDF (Premium)', onPress: () => onExportFormat('pdf') },
+      { text: isPremium ? 'Formatted (HTML)' : 'Formatted (Premium)', onPress: () => onExportFormat('html') },
       { text: 'Plain text', onPress: () => onExportFormat('txt') },
     ]);
   };
@@ -266,7 +265,7 @@ export default function EntryDetail() {
     }
   };
 
-  const onRemoveTag = async (tagId: number) => {
+  const onRemoveTag = async (tagId: string) => {
     if (!client || !entry) return;
     setTagBusy(true);
     setTagError(null);

@@ -1,7 +1,7 @@
 /**
  * Premium entitlement state, exposed to React. Configures RevenueCat once at
- * startup, ties the RC identity to the connected Wallabag account whenever
- * `authStore`'s credentials change, and refreshes the on-device "premium"
+ * startup, ties the RC identity to the signed-in Bindle account whenever
+ * `authStore`'s user changes, and refreshes the on-device "premium"
  * entitlement (RevenueCat is the source of truth). Everything degrades to
  * `isPremium: false` in Expo Go / when RC is not configured, so the app never
  * crashes on the native module.
@@ -35,27 +35,18 @@ interface PremiumContextValue {
 const PremiumContext = createContext<PremiumContextValue | null>(null);
 
 /**
- * Stable RevenueCat identity for one connected Wallabag account — ties the
- * "premium" entitlement to this server+username pair (not the device or a
- * random anonymous id), so Restore Purchases on a reinstall or a second
- * device recovers the same subscription as long as the same account is
- * reconnected. Lowercased for a consistent identity regardless of how the
- * user capitalized their username.
+ * Stable RevenueCat identity for one signed-in Bindle account — ties the
+ * "premium" entitlement to the account's own (stable, server-assigned) user
+ * id, not the device, so Restore Purchases on a reinstall or a second device
+ * recovers the same subscription as long as the same account signs back in.
  */
-export function identityFor(serverUrl: string, username: string): string {
-  const host = (() => {
-    try {
-      return new URL(serverUrl).host;
-    } catch {
-      return serverUrl;
-    }
-  })();
-  return `bindle:${host}:${username}`.toLowerCase();
+export function identityFor(userId: string): string {
+  return `bindle:${userId}`;
 }
 
 export function PremiumProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const status = useAuthStore((s) => s.status);
-  const credentials = useAuthStore((s) => s.credentials);
+  const user = useAuthStore((s) => s.user);
   const [isPremium, setIsPremium] = useState(false);
   const [loading, setLoading] = useState(true);
   const configuredOnce = useRef(false);
@@ -99,7 +90,7 @@ export function PremiumProvider({ children }: { children: React.ReactNode }): Re
   // Tie the RC identity to the connected account and refresh whenever it changes.
   useEffect(() => {
     if (status === 'checking') return;
-    const identity = credentials ? identityFor(credentials.serverUrl, credentials.username) : null;
+    const identity = user ? identityFor(user.id) : null;
     if (identity === lastIdentity.current) return;
     lastIdentity.current = identity;
 
@@ -124,7 +115,7 @@ export function PremiumProvider({ children }: { children: React.ReactNode }): Re
         .then(refresh)
         .catch(() => setLoading(false));
     }
-  }, [status, credentials, refresh]);
+  }, [status, user, refresh]);
 
   const value = useMemo<PremiumContextValue>(
     () => ({ isPremium, loading, refresh }),

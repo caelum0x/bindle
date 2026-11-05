@@ -1,13 +1,10 @@
 // Plain-text search helpers for full-text search across saved articles.
 //
-// Wallabag's own REST API has no free-text search query parameter — confirmed
-// against the server's real source (`src/Controller/Api/EntryRestController.php`,
-// `getEntriesAction`, github.com/wallabag/wallabag): it only accepts `archive`,
-// `starred`, `public`, `notParsed`, `tags`, `since`, `domain_name`, `http_status`,
-// `annotations`, `sort`/`order`/`page`/`perPage` — no `search`/`term`/`q` param
-// anywhere. So Bindle implements matching itself, client-side, against each
-// entry's title/content/domain/url — this file is that matching logic, original
-// code, no Wallabag source reused.
+// Bindle's own backend has a real server-side search (`GET /entries?q=`,
+// see `entriesRepository.searchEntries`'s primary path). This file is the
+// client-side fallback: matching against each entry's title/content/domain/
+// url locally, used when a live search can't reach the server at all (fully
+// offline) or when searching the cached offline copy directly.
 
 /** Strips HTML tags/entities down to the article's plain readable text, so a
  * search match reported mid-content doesn't land inside a tag or attribute. */

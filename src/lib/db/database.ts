@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import type { EntryFilter, WallabagAnnotation, WallabagEntry, WallabagTag } from '../api/types';
+import type { Annotation, Entry, EntryFilter, Tag } from '../api/types';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -9,7 +9,7 @@ function getDb() {
       await db.execAsync(`
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS entries (
-          id INTEGER PRIMARY KEY,
+          id TEXT PRIMARY KEY,
           title TEXT NOT NULL,
           url TEXT NOT NULL,
           domain_name TEXT,
@@ -24,14 +24,14 @@ function getDb() {
         );
         CREATE TABLE IF NOT EXISTS pending_actions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          entry_id INTEGER NOT NULL,
+          entry_id TEXT NOT NULL,
           action TEXT NOT NULL,
           value INTEGER NOT NULL,
           created_at INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS annotations (
-          id INTEGER PRIMARY KEY,
-          entry_id INTEGER NOT NULL,
+          id TEXT PRIMARY KEY,
+          entry_id TEXT NOT NULL,
           text TEXT NOT NULL DEFAULT '',
           quote TEXT NOT NULL,
           ranges_json TEXT NOT NULL,
@@ -41,8 +41,8 @@ function getDb() {
         );
         CREATE TABLE IF NOT EXISTS pending_annotations (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          local_id INTEGER NOT NULL,
-          entry_id INTEGER NOT NULL,
+          local_id TEXT NOT NULL,
+          entry_id TEXT NOT NULL,
           text TEXT NOT NULL DEFAULT '',
           quote TEXT NOT NULL,
           ranges_json TEXT NOT NULL,
@@ -55,7 +55,7 @@ function getDb() {
   return dbPromise;
 }
 
-export async function upsertEntries(items: WallabagEntry[]): Promise<void> {
+export async function upsertEntries(items: Entry[]): Promise<void> {
   if (items.length === 0) return;
   const db = await getDb();
   await db.withTransactionAsync(async () => {
@@ -88,7 +88,7 @@ export async function upsertEntries(items: WallabagEntry[]): Promise<void> {
   });
 }
 
-export async function getCachedEntries(filter: EntryFilter, tag?: string): Promise<WallabagEntry[]> {
+export async function getCachedEntries(filter: EntryFilter, tag?: string): Promise<Entry[]> {
   const db = await getDb();
   let where = '1=1';
   if (filter === 'unread') where = 'is_archived = 0';
@@ -113,7 +113,7 @@ export async function getCachedEntries(filter: EntryFilter, tag?: string): Promi
  * case-insensitive LIKE (searching raw stored content, since SQLite has no HTML
  * stripping; acceptable for an offline fallback — the live path in
  * `entriesRepository.searchEntries` does the stricter stripped-text match). */
-export async function searchCachedEntries(query: string): Promise<WallabagEntry[]> {
+export async function searchCachedEntries(query: string): Promise<Entry[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
   const db = await getDb();
@@ -132,15 +132,15 @@ export async function searchCachedEntries(query: string): Promise<WallabagEntry[
 }
 
 /** Derives the account's tag list from whatever entries are cached locally — the
- * offline fallback when a live GET /api/tags.json isn't reachable. Not a perfect
+ * offline fallback when a live `GET /tags` isn't reachable. Not a perfect
  * substitute (tags on entries that were never fetched won't appear) but real data,
  * not an empty screen. */
-export async function getCachedTags(): Promise<WallabagTag[]> {
+export async function getCachedTags(): Promise<Tag[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ tags_json: string }>('SELECT tags_json FROM entries');
-  const byId = new Map<number, WallabagTag>();
+  const byId = new Map<string, Tag>();
   for (const row of rows) {
-    const tags: WallabagTag[] = JSON.parse(row.tags_json ?? '[]');
+    const tags: Tag[] = JSON.parse(row.tags_json ?? '[]');
     for (const t of tags) {
       if (!byId.has(t.id)) byId.set(t.id, t);
     }
@@ -148,13 +148,13 @@ export async function getCachedTags(): Promise<WallabagTag[]> {
   return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export async function getCachedEntry(id: number): Promise<WallabagEntry | null> {
+export async function getCachedEntry(id: string): Promise<Entry | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<EntryRow>('SELECT * FROM entries WHERE id = ?', [id]);
   return row ? rowToEntry(row) : null;
 }
 
-export async function removeCachedEntry(id: number): Promise<void> {
+export async function removeCachedEntry(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('DELETE FROM entries WHERE id = ?', [id]);
 }
@@ -163,15 +163,15 @@ export async function removeCachedEntry(id: number): Promise<void> {
  * been deleted account-wide server-side — keeps the offline tag-derivation in
  * `getCachedTags`/`getCachedEntries` from still showing a tag that no longer
  * exists on the server. */
-export async function removeCachedTag(tagId: number): Promise<void> {
+export async function removeCachedTag(tagId: string): Promise<void> {
   const db = await getDb();
-  const rows = await db.getAllAsync<{ id: number; tags_json: string }>(
+  const rows = await db.getAllAsync<{ id: string; tags_json: string }>(
     'SELECT id, tags_json FROM entries WHERE tags_json LIKE ?',
-    [`%"id":${tagId}%`]
+    [`%"id":"${tagId}"%`]
   );
   await db.withTransactionAsync(async () => {
     for (const row of rows) {
-      const tags: WallabagTag[] = JSON.parse(row.tags_json ?? '[]');
+      const tags: Tag[] = JSON.parse(row.tags_json ?? '[]');
       const next = tags.filter((t) => t.id !== tagId);
       if (next.length !== tags.length) {
         await db.runAsync('UPDATE entries SET tags_json = ? WHERE id = ?', [JSON.stringify(next), row.id]);
@@ -181,7 +181,7 @@ export async function removeCachedTag(tagId: number): Promise<void> {
 }
 
 export async function updateCachedFlags(
-  id: number,
+  id: string,
   patch: Partial<{ is_archived: 0 | 1; is_starred: 0 | 1 }>
 ): Promise<void> {
   const db = await getDb();
@@ -194,7 +194,7 @@ export async function updateCachedFlags(
 }
 
 export async function queuePendingAction(
-  entryId: number,
+  entryId: string,
   action: 'archive' | 'starred',
   value: 0 | 1
 ): Promise<void> {
@@ -205,7 +205,7 @@ export async function queuePendingAction(
   );
 }
 
-type PendingActionRow = { id: number; entry_id: number; action: 'archive' | 'starred'; value: 0 | 1 };
+type PendingActionRow = { id: number; entry_id: string; action: 'archive' | 'starred'; value: 0 | 1 };
 
 export async function getPendingActions(): Promise<PendingActionRow[]> {
   const db = await getDb();
@@ -219,7 +219,7 @@ export async function clearPendingAction(id: number): Promise<void> {
 
 /** Caches the server's authoritative highlight list for one article, so the reader
  * screen can re-render highlights offline too (same write-through pattern as entries). */
-export async function upsertAnnotations(entryId: number, items: WallabagAnnotation[]): Promise<void> {
+export async function upsertAnnotations(entryId: string, items: Annotation[]): Promise<void> {
   const db = await getDb();
   await db.withTransactionAsync(async () => {
     await db.runAsync('DELETE FROM annotations WHERE entry_id = ?', [entryId]);
@@ -243,8 +243,8 @@ export async function upsertAnnotations(entryId: number, items: WallabagAnnotati
 }
 
 type AnnotationRow = {
-  id: number;
-  entry_id: number;
+  id: string;
+  entry_id: string;
   text: string;
   quote: string;
   ranges_json: string;
@@ -252,7 +252,7 @@ type AnnotationRow = {
   updated_at: string | null;
 };
 
-function rowToAnnotation(row: AnnotationRow): WallabagAnnotation {
+function rowToAnnotation(row: AnnotationRow): Annotation {
   return {
     id: row.id,
     text: row.text,
@@ -263,7 +263,7 @@ function rowToAnnotation(row: AnnotationRow): WallabagAnnotation {
   };
 }
 
-export async function getCachedAnnotations(entryId: number): Promise<WallabagAnnotation[]> {
+export async function getCachedAnnotations(entryId: string): Promise<Annotation[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<AnnotationRow>(
     'SELECT * FROM annotations WHERE entry_id = ? ORDER BY created_at ASC',
@@ -272,19 +272,20 @@ export async function getCachedAnnotations(entryId: number): Promise<WallabagAnn
   return rows.map(rowToAnnotation);
 }
 
-export async function removeCachedAnnotation(id: number): Promise<void> {
+export async function removeCachedAnnotation(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('DELETE FROM annotations WHERE id = ?', [id]);
 }
 
-/** Queues a highlight created while offline. `localId` is a negative placeholder id
- * (so it can be rendered/removed locally before the server assigns the real one). */
+/** Queues a highlight created while offline. `localId` is a placeholder id
+ * prefixed `local-` (so it can be rendered/removed locally before the server
+ * assigns the real one — see `annotationsRepository.createHighlight`). */
 export async function queuePendingAnnotation(
-  localId: number,
-  entryId: number,
+  localId: string,
+  entryId: string,
   quote: string,
   text: string,
-  ranges: WallabagAnnotation['ranges']
+  ranges: Annotation['ranges']
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
@@ -295,8 +296,8 @@ export async function queuePendingAnnotation(
 
 type PendingAnnotationRow = {
   id: number;
-  local_id: number;
-  entry_id: number;
+  local_id: string;
+  entry_id: string;
   text: string;
   quote: string;
   ranges_json: string;
@@ -322,7 +323,7 @@ export async function clearCache(): Promise<void> {
 }
 
 type EntryRow = {
-  id: number;
+  id: string;
   title: string;
   url: string;
   domain_name: string | null;
@@ -336,7 +337,7 @@ type EntryRow = {
   cached_at: number;
 };
 
-function rowToEntry(row: EntryRow): WallabagEntry {
+function rowToEntry(row: EntryRow): Entry {
   return {
     id: row.id,
     title: row.title,

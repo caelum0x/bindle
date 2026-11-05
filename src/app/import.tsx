@@ -25,9 +25,9 @@ import type { BulkSaveResult } from '../lib/api/types';
 import { usePremium } from '../premium/premium-context';
 import { FREE_MAX_BULK_IMPORT, clampBulkImport } from '../premium/limits';
 
-/** Batch save: paste any number of links, one per line, and send them to the
- * server in a single real `POST /api/entries/lists` call — not one save per
- * line, the actual bulk endpoint Wallabag exposes for this. */
+/** Batch save: paste any number of links, one per line, and send them to
+ * Bindle's own backend in a single real `POST /entries/bulk` call — not one
+ * save per line. */
 export default function Import() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
@@ -150,9 +150,9 @@ export default function Import() {
                   style={[styles.resultRow, { backgroundColor: c.surfaceAlt, borderColor: c.border }]}
                 >
                   <Feather
-                    name={r.entry ? 'check-circle' : 'x-circle'}
+                    name={r.ok ? 'check-circle' : 'x-circle'}
                     size={14}
-                    color={r.entry ? c.text : c.danger}
+                    color={r.ok ? c.text : c.danger}
                   />
                   <Text style={[typography.caption, { color: c.textMuted, flex: 1 }]} numberOfLines={1}>
                     {r.url}

@@ -9,7 +9,7 @@ import { radius, spacing, typography } from '../../lib/theme';
 import { FilterChips } from '../../components/FilterChips';
 import { EntryCard } from '../../components/EntryCard';
 import { EmptyState } from '../../components/EmptyState';
-import type { EntryFilter, WallabagEntry } from '../../lib/api/types';
+import type { EntryFilter, Entry } from '../../lib/api/types';
 import { flushPendingActions, listEntries, toggleArchive, toggleStar } from '../../lib/entriesRepository';
 import { flushPendingAnnotations } from '../../lib/annotationsRepository';
 import { getErrorMessage } from '../../lib/errors';
@@ -23,7 +23,7 @@ export default function Entries() {
   const [filter, setFilter] = useState<EntryFilter>('unread');
   const [tag, setTag] = useState<string | null>(null);
   const [tagLabel, setTagLabel] = useState<string | null>(null);
-  const [items, setItems] = useState<WallabagEntry[]>([]);
+  const [items, setItems] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -97,7 +97,7 @@ export default function Entries() {
     load({ silent: true });
   };
 
-  const onToggleStar = async (entry: WallabagEntry) => {
+  const onToggleStar = async (entry: Entry) => {
     if (!client) return;
     setItems((prev) =>
       prev.map((e) => (e.id === entry.id ? { ...e, is_starred: entry.is_starred ? 0 : 1 } : e))
@@ -105,7 +105,7 @@ export default function Entries() {
     await toggleStar(client, entry);
   };
 
-  const onToggleArchive = async (entry: WallabagEntry) => {
+  const onToggleArchive = async (entry: Entry) => {
     if (!client) return;
     setItems((prev) => prev.filter((e) => e.id !== entry.id || filter === 'all'));
     await toggleArchive(client, entry);

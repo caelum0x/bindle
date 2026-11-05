@@ -1,25 +1,24 @@
 import { create } from 'zustand';
-import type { WallabagClient } from '../api/wallabagClient';
-import type { WallabagCredentials } from '../api/types';
-import { clearStoredAuth, createClient, loadStoredClient, writeStoredCredentials } from './sharedAuth';
+import { BindleClient, login as apiLogin, signup as apiSignup } from '../api/bindleClient';
+import type { BindleUser } from '../api/types';
+import { clearStoredAuth, loadStoredClient, writeStoredSession } from './sharedAuth';
 
 type AuthStatus = 'checking' | 'signedOut' | 'signedIn';
 
 type AuthState = {
   status: AuthStatus;
-  credentials: WallabagCredentials | null;
-  client: WallabagClient | null;
-  serverLabel: string | null;
+  user: BindleUser | null;
+  client: BindleClient | null;
   restore: () => Promise<void>;
-  connect: (credentials: WallabagCredentials) => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
 export const useAuthStore = create<AuthState>((set) => ({
   status: 'checking',
-  credentials: null,
+  user: null,
   client: null,
-  serverLabel: null,
 
   restore: async () => {
     const stored = await loadStoredClient();
@@ -27,36 +26,23 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ status: 'signedOut' });
       return;
     }
-    set({
-      status: 'signedIn',
-      credentials: stored.credentials,
-      client: stored.client,
-      serverLabel: hostOf(stored.credentials.serverUrl),
-    });
+    set({ status: 'signedIn', user: stored.session.user, client: stored.client });
   },
 
-  connect: async (credentials: WallabagCredentials) => {
-    const client = createClient(credentials);
-    await client.testConnection();
-    await writeStoredCredentials(credentials);
-    set({
-      status: 'signedIn',
-      credentials,
-      client,
-      serverLabel: hostOf(credentials.serverUrl),
-    });
+  signUp: async (email: string, password: string) => {
+    const { token, user } = await apiSignup(email, password);
+    await writeStoredSession({ token, user });
+    set({ status: 'signedIn', user, client: new BindleClient(token) });
+  },
+
+  signIn: async (email: string, password: string) => {
+    const { token, user } = await apiLogin(email, password);
+    await writeStoredSession({ token, user });
+    set({ status: 'signedIn', user, client: new BindleClient(token) });
   },
 
   signOut: async () => {
     await clearStoredAuth();
-    set({ status: 'signedOut', credentials: null, client: null, serverLabel: null });
+    set({ status: 'signedOut', user: null, client: null });
   },
 }));
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}

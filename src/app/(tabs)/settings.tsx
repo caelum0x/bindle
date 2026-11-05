@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, Switch, StyleSheet, Linking } from 'react-native';
+import { View, Text, Pressable, Switch, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -18,7 +18,7 @@ import { usePremium } from '../../premium/premium-context';
 export default function Settings() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
-  const serverLabel = useAuthStore((s) => s.serverLabel);
+  const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const { isPremium } = usePremium();
 
@@ -67,8 +67,8 @@ export default function Settings() {
         </Pressable>
       </Section>
 
-      <Section title="Server">
-        <Row icon="server" label={serverLabel ?? 'Not connected'} c={c} />
+      <Section title="Account">
+        <Row icon="mail" label={user?.email ?? 'Not signed in'} c={c} />
         <Pressable
           testID="settings-open-account"
           onPress={() => router.push('/account')}
@@ -76,7 +76,7 @@ export default function Settings() {
         >
           <View style={styles.rowLeft}>
             <Feather name="user" size={18} color={c.textMuted} />
-            <Text style={[typography.body, { color: c.text }]}>Account & server info</Text>
+            <Text style={[typography.body, { color: c.text }]}>Account details</Text>
           </View>
           <Feather name="chevron-right" size={16} color={c.textFaint} />
         </Pressable>
@@ -103,27 +103,9 @@ export default function Settings() {
         </View>
       </Section>
 
-      <Section title="About">
-        <Row
-          icon="info"
-          label="Bindle connects to self-hosted Wallabag (MIT-licensed) servers. Independent client, not affiliated with or endorsed by the Wallabag project."
-          c={c}
-          multiline
-        />
-        <Pressable
-          onPress={() => Linking.openURL('https://github.com/wallabag/wallabag')}
-          style={[styles.row, { borderColor: c.border }]}
-        >
-          <View style={styles.rowLeft}>
-            <Feather name="external-link" size={18} color={c.textMuted} />
-            <Text style={[typography.body, { color: c.text }]}>Wallabag project (MIT License)</Text>
-          </View>
-        </Pressable>
-      </Section>
-
       <Pressable onPress={onSignOut} style={[styles.signOut, { borderColor: c.border }]}>
         <Feather name="log-out" size={18} color={c.danger} />
-        <Text style={[typography.body, { color: c.danger }]}>Disconnect server</Text>
+        <Text style={[typography.body, { color: c.danger }]}>Sign out</Text>
       </Pressable>
     </View>
   );

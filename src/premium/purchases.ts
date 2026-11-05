@@ -112,10 +112,10 @@ export async function configureRevenueCat(): Promise<void> {
 }
 
 /**
- * Tie the RevenueCat identity to the connected Wallabag account (see
+ * Tie the RevenueCat identity to the signed-in Bindle account (see
  * `premium-context.tsx`'s `identityFor`) so the entitlement follows that
  * account across reinstalls/devices via Restore Purchases. No-op in free
- * mode. Call on connect.
+ * mode. Call on sign-in.
  */
 export async function loginRevenueCat(identity: string): Promise<void> {
   const Purchases = await loadPurchases();
