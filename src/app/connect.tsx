@@ -83,10 +83,19 @@ export default function Connect() {
     AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
   }, []);
 
+  // `useIdTokenAuthRequest` calls `invariantClientId` synchronously during
+  // render (inside a `useMemo`) and THROWS if the platform's client id is
+  // undefined — it has no "disabled" mode. Real client ids aren't configured
+  // yet (OWNER BLOCKER, see oauthConfig.ts), so passing `undefined` here
+  // crashes this entire screen on every single launch, for every user,
+  // before anyone can even sign up. A harmless, never-dispatched placeholder
+  // keeps the hook from throwing; `onPressGoogle` below already refuses to
+  // call `promptGoogleAsync()` unless `isGoogleSignInConfigured` is true, so
+  // this placeholder is never actually used to attempt a real sign-in.
   const [, googleResponse, promptGoogleAsync] = useIdTokenAuthRequest({
-    iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
-    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
-    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
+    iosClientId: GOOGLE_IOS_CLIENT_ID || 'not-configured',
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID || 'not-configured',
+    webClientId: GOOGLE_WEB_CLIENT_ID || 'not-configured',
   });
 
   const modeAnim = useRef(new Animated.Value(1)).current;
