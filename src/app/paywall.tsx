@@ -1,7 +1,8 @@
 /**
  * Bindle Premium. Shown to every free account right after the real value
- * moment — the first successful server connect (see `connect.tsx`) — and
- * reachable any time afterward from Settings. Plans and prices come only
+ * moment — the first successful sign-up/sign-in (see `connect.tsx`'s
+ * `afterAuthSuccess`) — and reachable any time afterward from Settings. Plans
+ * and prices come only
  * from the store via RevenueCat (`priceString`); if the store returns
  * nothing, the screen says so and offers a retry rather than showing a price
  * written in code. Purchase -> RevenueCat entitlement ->
