@@ -6,10 +6,12 @@ import {
   getCachedEntries,
   getCachedEntry,
   getCachedTags,
+  getReadProgressBatch,
   queuePendingAction,
   removeCachedEntry,
   removeCachedTag,
   searchCachedEntries,
+  setReadProgress,
   updateCachedFlags,
   upsertEntries,
   getPendingActions,
@@ -22,6 +24,33 @@ export type EntriesResult = {
   items: Entry[];
   fromCache: boolean;
 };
+
+/** Merges each entry's local, on-device reading-progress (see `db/database.ts`)
+ * onto a fresh batch of entries just back from the server or the offline cache —
+ * `BindleClient`'s live responses never carry it (it's not server data), and
+ * `getCachedEntries` already carries it on cache-origin reads but this keeps a
+ * single merge point so every screen's list is consistent either way. Returns a
+ * new array (no mutation of the input items). */
+async function attachReadProgress(items: Entry[]): Promise<Entry[]> {
+  if (items.length === 0) return items;
+  const progress = await getReadProgressBatch(items.map((e) => e.id));
+  return items.map((item) => {
+    const local = progress.get(item.id);
+    return local ? { ...item, read_progress: local.progress, last_read_at: local.lastReadAt } : item;
+  });
+}
+
+/** Records how far into an article the user has scrolled (0..1), from the reader
+ * screen's injected-script scroll listener. Purely local bookkeeping — never
+ * calls the server — so it's safe to call frequently and never throws upward;
+ * a failed write just means the resume position doesn't advance this one time. */
+export async function markReadProgress(id: string, progress: number): Promise<void> {
+  try {
+    await setReadProgress(id, progress);
+  } catch {
+    // Best-effort — losing one progress update is not worth surfacing to the UI.
+  }
+}
 
 export type TagsResult = {
   items: Tag[];
@@ -54,7 +83,7 @@ export async function listEntries(
   try {
     const page = await client.fetchEntries({ filter, perPage: 50, tag });
     await upsertEntries(page.items);
-    return { items: page.items, fromCache: false };
+    return { items: await attachReadProgress(page.items), fromCache: false };
   } catch (err) {
     const cached = await getCachedEntries(filter, tag);
     if (cached.length > 0) {
@@ -110,7 +139,7 @@ export async function searchEntries(client: BindleClient, query: string): Promis
       totalPages = result.pages || 1;
       page += 1;
     }
-    return { items: matches, fromCache: false };
+    return { items: await attachReadProgress(matches), fromCache: false };
   } catch {
     // Server search unavailable — fall through to the page-walk below.
   }
@@ -137,7 +166,7 @@ export async function searchEntries(client: BindleClient, query: string): Promis
   }
 
   if (reachedServer) {
-    return { items: matches, fromCache: false };
+    return { items: await attachReadProgress(matches), fromCache: false };
   }
 
   const cached = await searchCachedEntries(q);
@@ -175,7 +204,8 @@ export async function loadEntry(
   try {
     const entry = await client.fetchEntry(id);
     await upsertEntries([entry]);
-    return { entry, fromCache: false };
+    const [withProgress] = await attachReadProgress([entry]);
+    return { entry: withProgress, fromCache: false };
   } catch (err) {
     const cached = await getCachedEntry(id);
     if (cached) return { entry: cached, fromCache: true };

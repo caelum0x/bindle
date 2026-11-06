@@ -21,6 +21,7 @@ import {
   addTagToEntry,
   exportEntryToFile,
   loadEntry,
+  markReadProgress,
   reloadEntryContent,
   removeEntry,
   removeTagFromEntry,
@@ -33,14 +34,16 @@ import {
   loadAnnotations,
 } from '../../lib/annotationsRepository';
 import { buildHighlightScript } from '../../lib/annotations/highlightScript';
+import { buildReadingProgressScript } from '../../lib/reading/progressScript';
 import type { EntryExportFormat, Annotation, Entry } from '../../lib/api/types';
 import { getErrorMessage } from '../../lib/errors';
 import { usePremium } from '../../premium/premium-context';
 import { isExportFormatPremium } from '../../premium/limits';
 
-type HighlightMessage =
+type WebViewToRNMessage =
   | { type: 'createHighlight'; quote: string; ranges: Annotation['ranges'] }
-  | { type: 'deleteHighlightRequest'; id: string };
+  | { type: 'deleteHighlightRequest'; id: string }
+  | { type: 'readingProgress'; progress: number };
 
 // react-native-webview's shipped types resolve (under plain `tsc`, which can't follow
 // its .ios.d.ts/.android.d.ts platform-specific forwardRef typings the way Metro does
@@ -141,10 +144,15 @@ export default function EntryDetail() {
 
   const onWebViewMessage = async (event: WebViewMessageEvent) => {
     if (!client || !entry) return;
-    let message: HighlightMessage;
+    let message: WebViewToRNMessage;
     try {
-      message = JSON.parse(event.nativeEvent.data) as HighlightMessage;
+      message = JSON.parse(event.nativeEvent.data) as WebViewToRNMessage;
     } catch {
+      return;
+    }
+    if (message.type === 'readingProgress') {
+      setEntry((prev) => (prev ? { ...prev, read_progress: message.progress } : prev));
+      await markReadProgress(entry.id, message.progress);
       return;
     }
     if (message.type === 'createHighlight') {
@@ -379,15 +387,25 @@ export default function EntryDetail() {
       ) : error || !entry ? (
         <EmptyState icon="alert-triangle" title="Couldn't open this article" subtitle={error ?? undefined} />
       ) : (
-        <RefCapableWebView
-          ref={webViewRef}
-          originWhitelist={['*']}
-          source={{ html: buildHtml(entry, dark) }}
-          style={{ backgroundColor: c.background, flex: 1 }}
-          injectedJavaScript={buildHighlightScript(dark)}
-          onMessage={onWebViewMessage}
-          onLoadEnd={renderHighlightsInWebView}
-        />
+        <>
+          <RefCapableWebView
+            ref={webViewRef}
+            originWhitelist={['*']}
+            source={{ html: buildHtml(entry, dark) }}
+            style={{ backgroundColor: c.background, flex: 1 }}
+            injectedJavaScript={buildHighlightScript(dark) + buildReadingProgressScript(entry.read_progress ?? 0)}
+            onMessage={onWebViewMessage}
+            onLoadEnd={renderHighlightsInWebView}
+          />
+          <View style={[styles.progressTrack, { backgroundColor: c.border }]}>
+            <View
+              style={[
+                styles.progressFill,
+                { backgroundColor: c.text, width: `${Math.round((entry.read_progress ?? 0) * 100)}%` },
+              ]}
+            />
+          </View>
+        </>
       )}
     </View>
   );
@@ -430,5 +448,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 1,
     borderStyle: 'dashed',
+  },
+  progressTrack: {
+    height: 2,
+    width: '100%',
+  },
+  progressFill: {
+    height: 2,
   },
 });

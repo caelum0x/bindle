@@ -35,7 +35,9 @@ function getDb(): SQLite.SQLiteDatabase {
         created_at TEXT,
         updated_at TEXT,
         tags_json TEXT NOT NULL DEFAULT '[]',
-        cached_at INTEGER NOT NULL
+        cached_at INTEGER NOT NULL,
+        read_progress REAL NOT NULL DEFAULT 0,
+        last_read_at INTEGER
       );
       CREATE TABLE IF NOT EXISTS pending_actions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +66,21 @@ function getDb(): SQLite.SQLiteDatabase {
         created_at INTEGER NOT NULL
       );
     `);
+    // Additive migration for installs whose `entries` table already existed before
+    // reading-progress tracking shipped — `CREATE TABLE IF NOT EXISTS` above is a
+    // no-op against an existing table, so the two new columns need their own
+    // idempotent `ALTER TABLE`, same pattern `bindle-core`'s server-side migrations
+    // already use for additive schema changes against a live table with real rows.
+    try {
+      db.execSync('ALTER TABLE entries ADD COLUMN read_progress REAL NOT NULL DEFAULT 0;');
+    } catch {
+      // Column already exists on a fresh install (created by the CREATE TABLE above).
+    }
+    try {
+      db.execSync('ALTER TABLE entries ADD COLUMN last_read_at INTEGER;');
+    } catch {
+      // Column already exists on a fresh install (created by the CREATE TABLE above).
+    }
   }
   return db;
 }
@@ -348,6 +365,8 @@ type EntryRow = {
   updated_at: string;
   tags_json: string;
   cached_at: number;
+  read_progress: number | null;
+  last_read_at: number | null;
 };
 
 function rowToEntry(row: EntryRow): Entry {
@@ -363,5 +382,46 @@ function rowToEntry(row: EntryRow): Entry {
     created_at: row.created_at,
     updated_at: row.updated_at,
     tags: JSON.parse(row.tags_json ?? '[]'),
+    read_progress: row.read_progress ?? 0,
+    last_read_at: row.last_read_at ?? undefined,
   };
+}
+
+/** Reading progress (0..1, how far the user has scrolled into an article's reader
+ * view) is a purely local, on-device signal — never sent to or read from
+ * `bindle-core`, deliberately not part of the `Entry` wire shape `BindleClient`
+ * parses. It lives only in this SQLite cache and survives exactly as long as the
+ * app's local storage does (same durability as the offline article cache itself).
+ * Looked up in batches so `listEntries`/`loadEntry` can merge it onto whichever
+ * entries they just fetched (live or cached) without a query per row. */
+export async function getReadProgressBatch(
+  ids: string[]
+): Promise<Map<string, { progress: number; lastReadAt?: number }>> {
+  const result = new Map<string, { progress: number; lastReadAt?: number }>();
+  if (ids.length === 0) return result;
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.getAllSync<{ id: string; read_progress: number | null; last_read_at: number | null }>(
+    `SELECT id, read_progress, last_read_at FROM entries WHERE id IN (${placeholders})`,
+    ids
+  );
+  for (const row of rows) {
+    result.set(row.id, { progress: row.read_progress ?? 0, lastReadAt: row.last_read_at ?? undefined });
+  }
+  return result;
+}
+
+/** Persists how far into an article the user has scrolled. Clamped to [0, 1] here
+ * (not trusted from the WebView's own math) and a no-op if the entry isn't cached
+ * yet (can't happen in practice — the reader screen always writes the entry
+ * through `upsertEntries` before the WebView can emit a scroll event, but cheap
+ * to guard regardless of call order). */
+export async function setReadProgress(id: string, progress: number): Promise<void> {
+  const clamped = Math.max(0, Math.min(1, progress));
+  const db = getDb();
+  db.runSync('UPDATE entries SET read_progress = ?, last_read_at = ? WHERE id = ?', [
+    clamped,
+    Date.now(),
+    id,
+  ]);
 }

@@ -10,6 +10,15 @@ function estimateMinutes(entry: Entry): number {
   return Math.max(1, Math.round(words / 200));
 }
 
+/** Only worth showing once the user is meaningfully into an article and hasn't
+ * basically finished it — below ~3% is indistinguishable from "never opened",
+ * above ~97% is indistinguishable from "done" (and `is_archived` already
+ * covers "I'm finished with this" as a deliberate user action). */
+function hasPartialProgress(entry: Entry): boolean {
+  const p = entry.read_progress ?? 0;
+  return p > 0.03 && p < 0.97;
+}
+
 export function EntryCard({
   entry,
   onPress,
@@ -37,7 +46,18 @@ export function EntryCard({
         </Text>
         <Text style={[typography.caption, { color: c.textFaint, marginTop: spacing.xs }]} numberOfLines={1}>
           {entry.domain_name || hostOf(entry.url)} · {estimateMinutes(entry)} min
+          {hasPartialProgress(entry) ? ` · ${Math.round((entry.read_progress ?? 0) * 100)}% read` : ''}
         </Text>
+        {hasPartialProgress(entry) && (
+          <View style={[styles.progressTrack, { backgroundColor: c.border }]}>
+            <View
+              style={[
+                styles.progressFill,
+                { backgroundColor: c.textMuted, width: `${Math.round((entry.read_progress ?? 0) * 100)}%` },
+              ]}
+            />
+          </View>
+        )}
         {entry.tags.length > 0 && (
           <View style={styles.tagsRow}>
             {entry.tags.slice(0, 3).map((t) => (
@@ -109,5 +129,14 @@ const styles = StyleSheet.create({
   },
   outline: {
     opacity: 0.6,
+  },
+  progressTrack: {
+    height: 2,
+    borderRadius: 1,
+    marginTop: spacing.sm,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 2,
   },
 });

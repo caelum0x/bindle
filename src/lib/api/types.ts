@@ -25,6 +25,14 @@ export type Entry = {
   created_at: string; // ISO
   updated_at: string;
   tags: Tag[];
+  /** How far the user has scrolled into the reader view, 0..1. Purely local/
+   * on-device (see `db/database.ts`'s `getReadProgressBatch`/`setReadProgress`)
+   * — never sent by or read from `bindle-core`; merged onto every `Entry`
+   * returned by `entriesRepository` right before it reaches the UI. Absent
+   * (treated as 0) on an `Entry` straight out of `BindleClient` before that
+   * merge happens. */
+  read_progress?: number;
+  last_read_at?: number;
 };
 
 export type EntriesPage = {
