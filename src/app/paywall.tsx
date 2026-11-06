@@ -15,6 +15,7 @@ import {
   Alert,
   Animated,
   Easing,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -28,6 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePremium } from '../premium/premium-context';
 import {
   fetchPlans,
+  manageSubscriptionUrl,
   purchasePremium,
   restorePurchases,
   type PlanInfo,
@@ -180,6 +182,17 @@ export default function PaywallScreen(): React.JSX.Element {
           <Text style={[typography.body, { color: c.textMuted, marginTop: spacing.xs, textAlign: 'center' }]}>
             Unlimited bulk import and every export format are unlocked.
           </Text>
+          <Pressable
+            testID="paywall-manage-subscription"
+            onPress={() => void Linking.openURL(manageSubscriptionUrl())}
+            accessibilityLabel="Manage subscription"
+            accessibilityRole="button"
+            style={({ pressed }) => ({ marginTop: spacing.lg, opacity: pressed ? 0.6 : 1 })}
+          >
+            <Text style={[typography.body, { color: c.text, fontWeight: '600', textAlign: 'center' }]}>
+              Manage subscription
+            </Text>
+          </Pressable>
           <Pressable
             testID="paywall-close"
             onPress={() => router.back()}
