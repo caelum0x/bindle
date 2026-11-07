@@ -17,6 +17,7 @@ import { useTheme } from '../../lib/useTheme';
 import { radius, spacing, typography } from '../../lib/theme';
 import { IconButton } from '../../components/IconButton';
 import { EmptyState } from '../../components/EmptyState';
+import { ReaderControls } from '../../components/ReaderControls';
 import {
   addTagToEntry,
   exportEntryToFile,
@@ -35,6 +36,15 @@ import {
 } from '../../lib/annotationsRepository';
 import { buildHighlightScript } from '../../lib/annotations/highlightScript';
 import { buildReadingProgressScript } from '../../lib/reading/progressScript';
+import {
+  DEFAULT_READER_PREFS,
+  fontSizePx,
+  lineHeightValue,
+  loadReaderPrefs,
+  resolveReaderPalette,
+  saveReaderPrefs,
+  type ReaderPrefs,
+} from '../../lib/reading/readerPrefs';
 import type { EntryExportFormat, Annotation, Entry } from '../../lib/api/types';
 import { getErrorMessage } from '../../lib/errors';
 import { usePremium } from '../../premium/premium-context';
@@ -56,26 +66,26 @@ const RefCapableWebView = WebView as unknown as ComponentType<
   ComponentProps<typeof WebView> & { ref?: Ref<WebViewHandle> }
 >;
 
-function buildHtml(entry: Entry, dark: boolean): string {
-  const bg = dark ? '#0B0B0B' : '#FFFFFF';
-  const fg = dark ? '#F5F5F5' : '#111111';
-  const muted = dark ? '#A3A3A3' : '#6B6B6B';
+function buildHtml(entry: Entry, prefs: ReaderPrefs, systemDark: boolean): string {
+  const { bg, fg, muted, highlightBg } = resolveReaderPalette(prefs.theme, systemDark);
+  const fontSize = fontSizePx(prefs.fontSize);
+  const lineHeight = lineHeightValue(prefs.lineHeight);
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>
   body { background:${bg}; color:${fg}; font-family:-apple-system,Roboto,sans-serif;
-         font-size:18px; line-height:1.6; padding:20px 20px 64px; margin:0; }
+         font-size:${fontSize}px; line-height:${lineHeight}; padding:20px 20px 64px; margin:0; }
   h1,h2,h3 { line-height:1.3; }
   a { color:${fg}; text-decoration: underline; }
   img, video, iframe { max-width:100%; height:auto; border-radius:12px; }
   figure { margin: 16px 0; }
   .bindle-meta { color:${muted}; font-size:13px; margin-bottom: 20px; }
-  .bindle-title { font-size: 26px; font-weight: 700; margin-bottom: 8px; }
+  .bindle-title { font-size: ${Math.round(fontSize * 1.45)}px; font-weight: 700; margin-bottom: 8px; }
   blockquote { border-left: 3px solid ${muted}; margin-left:0; padding-left:14px; color:${muted}; }
   pre, code { white-space: pre-wrap; }
-  mark.bindle-highlight { background:${dark ? '#3A3A3A' : '#E5E5E5'}; color:${fg}; border-radius:2px; }
+  mark.bindle-highlight { background:${highlightBg}; color:${fg}; border-radius:2px; }
 </style>
 </head>
 <body>
@@ -108,7 +118,18 @@ export default function EntryDetail() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [refreshingContent, setRefreshingContent] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [readerPrefs, setReaderPrefs] = useState<ReaderPrefs>(DEFAULT_READER_PREFS);
+  const [readerControlsVisible, setReaderControlsVisible] = useState(false);
   const webViewRef = useRef<WebViewHandle>(null);
+
+  useEffect(() => {
+    loadReaderPrefs().then(setReaderPrefs);
+  }, []);
+
+  const onChangeReaderPrefs = (next: ReaderPrefs) => {
+    setReaderPrefs(next);
+    void saveReaderPrefs(next);
+  };
 
   useEffect(() => {
     if (!client) return;
@@ -287,6 +308,8 @@ export default function EntryDetail() {
     }
   };
 
+  const readerPalette = resolveReaderPalette(readerPrefs.theme, dark);
+
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top }}>
       <View style={styles.header}>
@@ -302,6 +325,13 @@ export default function EntryDetail() {
           <View />
         )}
         <View style={{ flexDirection: 'row' }}>
+          <IconButton
+            testID="detail-reader-settings"
+            name="type"
+            accessibilityLabel="Reader display settings"
+            onPress={() => setReaderControlsVisible(true)}
+            disabled={!entry}
+          />
           <IconButton
             testID="detail-refresh"
             name="refresh-cw"
@@ -391,9 +421,16 @@ export default function EntryDetail() {
           <RefCapableWebView
             ref={webViewRef}
             originWhitelist={['*']}
-            source={{ html: buildHtml(entry, dark) }}
+            source={{ html: buildHtml(entry, readerPrefs, dark) }}
             style={{ backgroundColor: c.background, flex: 1 }}
-            injectedJavaScript={buildHighlightScript(dark) + buildReadingProgressScript(entry.read_progress ?? 0)}
+            injectedJavaScript={
+              buildHighlightScript(dark, {
+                markBg: readerPalette.highlightBg,
+                markFg: readerPalette.fg,
+                btnBg: readerPalette.fg,
+                btnFg: readerPalette.bg,
+              }) + buildReadingProgressScript(entry.read_progress ?? 0)
+            }
             onMessage={onWebViewMessage}
             onLoadEnd={renderHighlightsInWebView}
           />
@@ -407,6 +444,13 @@ export default function EntryDetail() {
           </View>
         </>
       )}
+
+      <ReaderControls
+        visible={readerControlsVisible}
+        onClose={() => setReaderControlsVisible(false)}
+        prefs={readerPrefs}
+        onChange={onChangeReaderPrefs}
+      />
     </View>
   );
 }

@@ -3,12 +3,7 @@ import { Feather } from '@expo/vector-icons';
 import { useTheme } from '../lib/useTheme';
 import { radius, spacing, typography } from '../lib/theme';
 import type { Entry } from '../lib/api/types';
-
-function estimateMinutes(entry: Entry): number {
-  if (entry.reading_time && entry.reading_time > 0) return entry.reading_time;
-  const words = (entry.content ?? '').split(/\s+/).length;
-  return Math.max(1, Math.round(words / 200));
-}
+import { estimateReadingMinutes } from '../lib/sortEntries';
 
 /** Only worth showing once the user is meaningfully into an article and hasn't
  * basically finished it — below ~3% is indistinguishable from "never opened",
@@ -45,7 +40,7 @@ export function EntryCard({
           {entry.title || '(untitled)'}
         </Text>
         <Text style={[typography.caption, { color: c.textFaint, marginTop: spacing.xs }]} numberOfLines={1}>
-          {entry.domain_name || hostOf(entry.url)} · {estimateMinutes(entry)} min
+          {entry.domain_name || hostOf(entry.url)} · {estimateReadingMinutes(entry)} min
           {hasPartialProgress(entry) ? ` · ${Math.round((entry.read_progress ?? 0) * 100)}% read` : ''}
         </Text>
         {hasPartialProgress(entry) && (

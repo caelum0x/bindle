@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, View, Text, Pressable, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, View, Text, Pressable, FlatList, RefreshControl, StyleSheet, Alert } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '../../lib/auth/authStore';
 import { useTheme } from '../../lib/useTheme';
 import { radius, spacing, typography } from '../../lib/theme';
@@ -13,6 +14,9 @@ import type { EntryFilter, Entry } from '../../lib/api/types';
 import { flushPendingActions, listEntries, toggleArchive, toggleStar } from '../../lib/entriesRepository';
 import { flushPendingAnnotations } from '../../lib/annotationsRepository';
 import { getErrorMessage } from '../../lib/errors';
+import { SORT_LABELS, SORT_ORDER, sortEntries, type EntrySort } from '../../lib/sortEntries';
+
+const SORT_KEY = 'bindle.entries.sort.v1';
 
 export default function Entries() {
   const { c } = useTheme();
@@ -24,10 +28,34 @@ export default function Entries() {
   const [tag, setTag] = useState<string | null>(null);
   const [tagLabel, setTagLabel] = useState<string | null>(null);
   const [items, setItems] = useState<Entry[]>([]);
+  const [sort, setSort] = useState<EntrySort>('newest');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    SecureStore.getItemAsync(SORT_KEY).then((saved) => {
+      if (saved && (SORT_ORDER as string[]).includes(saved)) setSort(saved as EntrySort);
+    });
+  }, []);
+
+  const sortedItems = useMemo(() => sortEntries(items, sort), [items, sort]);
+
+  const onChangeSort = (next: EntrySort) => {
+    setSort(next);
+    void SecureStore.setItemAsync(SORT_KEY, next);
+  };
+
+  const onOpenSortMenu = () => {
+    const options: { text: string; onPress: () => void; style?: 'cancel' | 'destructive' | 'default' }[] =
+      SORT_ORDER.map((key) => ({
+        text: key === sort ? `${SORT_LABELS[key]} (current)` : SORT_LABELS[key],
+        onPress: () => onChangeSort(key),
+      }));
+    options.push({ text: 'Cancel', onPress: () => {}, style: 'cancel' });
+    Alert.alert('Sort by', undefined, options);
+  };
 
   // Arriving from the Tags screen with ?tag=slug&tagLabel=Name — switch straight to
   // "All" so a tag filter never hides archived/starred matches, and adopt the tag.
@@ -137,8 +165,26 @@ export default function Entries() {
           </Pressable>
         </View>
       </View>
-      <View style={{ marginTop: spacing.sm, marginBottom: spacing.md }}>
-        <FilterChips value={filter} onChange={setFilter} />
+      <View
+        style={{
+          marginTop: spacing.sm,
+          marginBottom: spacing.md,
+          flexDirection: 'row',
+          alignItems: 'center',
+        }}
+      >
+        <View style={{ flex: 1 }}>
+          <FilterChips value={filter} onChange={setFilter} />
+        </View>
+        <Pressable
+          testID="entries-open-sort"
+          onPress={onOpenSortMenu}
+          accessibilityLabel={`Sort order: ${SORT_LABELS[sort]}`}
+          hitSlop={8}
+          style={{ paddingHorizontal: spacing.md }}
+        >
+          <Feather name="sliders" size={18} color={sort === 'newest' ? c.textMuted : c.text} />
+        </Pressable>
       </View>
       {tag ? (
         <View style={[styles.tagRow, { paddingHorizontal: spacing.md }]}>
@@ -168,7 +214,7 @@ export default function Entries() {
         />
       ) : (
         <FlatList
-          data={items}
+          data={sortedItems}
           keyExtractor={(e) => String(e.id)}
           contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: spacing.xxl, gap: spacing.sm }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.text} />}

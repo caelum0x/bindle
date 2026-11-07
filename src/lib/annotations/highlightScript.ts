@@ -19,12 +19,20 @@
 /** Returns the full `<script>` body injected once per article load (via
  * `injectedJavaScript`). Builds the selection → highlight-button → postMessage flow
  * and exposes `window.bindleRenderHighlights`/`window.bindleClearHighlights` for the
- * RN side to call after annotations are fetched. */
-export function buildHighlightScript(dark: boolean): string {
-  const markBg = dark ? '#3A3A3A' : '#E5E5E5';
-  const markFg = dark ? '#F5F5F5' : '#111111';
-  const btnBg = dark ? '#F5F5F5' : '#111111';
-  const btnFg = dark ? '#111111' : '#F5F5F5';
+ * RN side to call after annotations are fetched.
+ *
+ * `markColors`, when passed, overrides the plain light/dark defaults below —
+ * used for the reader's sepia theme (see `readerPrefs.ts`'s `resolveReaderPalette`)
+ * so saved highlights stay legible against the sepia background instead of
+ * rendering with light-mode's near-white button/mark colors. */
+export function buildHighlightScript(
+  dark: boolean,
+  markColors?: { markBg: string; markFg: string; btnBg: string; btnFg: string }
+): string {
+  const markBg = markColors?.markBg ?? (dark ? '#3A3A3A' : '#E5E5E5');
+  const markFg = markColors?.markFg ?? (dark ? '#F5F5F5' : '#111111');
+  const btnBg = markColors?.btnBg ?? (dark ? '#F5F5F5' : '#111111');
+  const btnFg = markColors?.btnFg ?? (dark ? '#111111' : '#F5F5F5');
 
   return `
 (function () {
